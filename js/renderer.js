@@ -1129,11 +1129,7 @@ function renderFishes(g, ctx, pal) {
     }
 
     if (f.species.id === 'angler') {
-      const glow = 0.35 + 0.28 * Math.sin(g.time * 6 + f.phase);
-      ctx.globalAlpha = glow;
-      ctx.fillStyle = '#fef08a';
-      const lx = f.dir >= 0 ? dx + sprSet.w - 6 : dx + 2;
-      ctx.fillRect(lx, dy + 1, 4, 4);
+      renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, f.dir, frame, g.time, f.phase, depthRatio, pal.night);
     }
 
     if (f.ai === 'AMBUSH' && g.state === 'REELING') {
@@ -1179,6 +1175,71 @@ function renderFishes(g, ctx, pal) {
   }
 }
 
+// Realistic volumetric deep-sea bioluminescence for the Anglerfish esca bulb (zero blocky squares!)
+// Tracks the exact swaying bulb center across all 4 swim frames with soft additive underwater scatter.
+function renderAnglerBioluminescence(ctx, dx, dy, sprW, dir, frame, time, phase, depthRatio, night) {
+  // Bulb center pixel coordinates in the 28x18 right-facing angler sprite per animation frame
+  const tipX = [24.5, 25.5, 24.5, 23.5][frame % 4];
+  const tipY = [6.5, 5.5, 6.5, 7.5][frame % 4];
+  const lx = dir >= 0 ? dx + tipX : dx + (sprW - tipX);
+  const ly = dy + tipY;
+
+  // Organic symbiotic bacterial breathing shimmer (non-mechanical multi-harmonic modulation)
+  const breathe = 0.78 + 0.14 * Math.sin(time * 2.9 + phase * 1.7) + 0.08 * Math.sin(time * 6.3 + phase * 3.1);
+  // Glow stands out richer in deep abyssal water and at night
+  const envBoost = 0.85 + depthRatio * 0.32 + night * 0.25;
+  const intensity = clamp(breathe * envBoost, 0.55, 1.32);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  // 1. Wide soft underwater cyan-teal scatter halo (realistic water light attenuation)
+  const outerR = 15.5 + 2.0 * breathe;
+  const gOuter = ctx.createRadialGradient(lx, ly, 0.5, lx, ly, outerR);
+  gOuter.addColorStop(0.00, `rgba(125, 238, 252, ${(0.24 * intensity).toFixed(3)})`);
+  gOuter.addColorStop(0.32, `rgba(45, 212, 191, ${(0.14 * intensity).toFixed(3)})`);
+  gOuter.addColorStop(0.68, `rgba(14, 116, 144, ${(0.055 * intensity).toFixed(3)})`);
+  gOuter.addColorStop(1.00, 'rgba(14, 116, 144, 0)');
+  ctx.fillStyle = gOuter;
+  ctx.beginPath();
+  ctx.arc(lx, ly, outerR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Inner luminous ice-aqua corona
+  const midR = 5.2 + 0.8 * breathe;
+  const gMid = ctx.createRadialGradient(lx, ly, 0.2, lx, ly, midR);
+  gMid.addColorStop(0.00, `rgba(240, 253, 255, ${(0.68 * intensity).toFixed(3)})`);
+  gMid.addColorStop(0.45, `rgba(167, 243, 228, ${(0.34 * intensity).toFixed(3)})`);
+  gMid.addColorStop(1.00, 'rgba(56, 189, 248, 0)');
+  ctx.fillStyle = gMid;
+  ctx.beginPath();
+  ctx.arc(lx, ly, midR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 3. Soft reflected aqua rim light grazing the angler's face & front fangs
+  const faceX = lx - dir * 5.2;
+  const faceY = ly + 4.4;
+  const gFace = ctx.createRadialGradient(faceX, faceY, 0.4, faceX, faceY, 6.2);
+  gFace.addColorStop(0.00, `rgba(103, 232, 249, ${(0.16 * intensity).toFixed(3)})`);
+  gFace.addColorStop(1.00, 'rgba(56, 189, 248, 0)');
+  ctx.fillStyle = gFace;
+  ctx.beginPath();
+  ctx.arc(faceX, faceY, 6.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 4. Tiny organic drifting bioluminescent plankton motes attracted to the lure
+  for (let m = 0; m < 2; m++) {
+    const a = time * (1.8 + m * 0.7) + phase + m * 3.1;
+    const mx = Math.round(lx + Math.cos(a) * (3.5 + m * 2.2));
+    const my = Math.round(ly + Math.sin(a * 1.3) * (2.6 + m * 1.4));
+    const ma = (0.28 + 0.25 * Math.sin(time * 4.5 + m * 2.1 + phase)) * intensity;
+    ctx.fillStyle = `rgba(207, 250, 254, ${clamp(ma, 0, 0.65).toFixed(3)})`;
+    ctx.fillRect(mx, my, 1, 1);
+  }
+
+  ctx.restore();
+}
+
 // Foreground pass for the lifted fish during LANDING so it glides cleanly above the water & pier straight into the angler's hand (0px jump, 0 z-pop!)
 function renderLandingFishForeground(g, ctx) {
   if (g.state !== 'LANDING' || !g.activeFish) return;
@@ -1190,6 +1251,9 @@ function renderLandingFishForeground(g, ctx) {
   const dx = Math.round(f.x - sprSet.w / 2);
   const dy = Math.round(f.y - sprSet.h / 2);
   ctx.drawImage(img, dx, dy);
+  if (f.species.id === 'angler') {
+    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, f.dir, frame, g.time, f.phase, 0.5, 0.4);
+  }
 }
 
 function renderWaterSurface(g, ctx, map, pal, cel) {
