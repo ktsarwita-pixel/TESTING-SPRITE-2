@@ -1,0 +1,28 @@
+{
+  "tool": "AIEGOBOT/agent-audio (generate_audio)",
+  "manifestTarget": "assets/sfx/manifest.json",
+  "notes": "Each key maps directly to SoundEngine in js/audio.js. Arrays enable automatic anti-repetition round-robin playback.",
+  "clips": [
+    { "key": "cast", "variants": 3, "seconds": 1.2, "prompt": "carbon fiber fishing rod whipping crisply through coastal air with light monofilament spool zip, dry outdoor foley, no voice, no music" },
+    { "key": "splash_small", "variants": 3, "seconds": 1.0, "prompt": "small cork bobber and lead sinker plopping into calm harbor water with crisp bubbles and short splash decay, close-mic water foley, no voice, no music" },
+    { "key": "splash_big", "variants": 3, "seconds": 1.5, "prompt": "heavy fish breaching and splashing loudly on ocean surface with turbulent spray and bubbling boil, realistic outdoor coastal foley, no voice, no music" },
+    { "key": "nibble", "variants": 3, "seconds": 0.8, "prompt": "fishing bobber dipping quickly underwater with gentle hollow water bloops and tiny ripple, close-mic water foley, no voice, no music" },
+    { "key": "bite", "variants": 2, "seconds": 1.4, "prompt": "sudden underwater fish strike splash followed by crisp double ring of a small brass rod-tip bell, outdoor coastal foley, no voice, no music" },
+    { "key": "bite_big", "variants": 2, "seconds": 1.8, "prompt": "massive underwater strike splash with rapid urgent brass fishing rod bell ringing on a wooden pier, realistic outdoor foley, no voice, no music" },
+    { "key": "hook_set", "variants": 2, "seconds": 0.9, "prompt": "snappy upward carbon fishing rod jerk setting a hook with taut nylon line snap and water splash, close-mic foley, no voice, no music" },
+    { "key": "reel_tick", "variants": 4, "seconds": 0.3, "prompt": "single crisp metallic spinning fishing reel gear pawl ratchet click, dry close-mic mechanical foley, short decay, no voice, no music" },
+    { "key": "drag_out", "variants": 2, "seconds": 0.7, "prompt": "fast metallic spinning fishing reel drag clutch clicking rapidly under tension as a fish pulls line out, dry mechanical foley, no voice, no music" },
+    { "key": "fish_thrash", "variants": 3, "seconds": 1.4, "prompt": "hooked fish thrashing furiously at water surface with wet tail slaps and foaming whitewater splashes, realistic coastal water foley, no voice, no music" },
+    { "key": "tension_warn", "variants": 2, "seconds": 0.7, "prompt": "stretched monofilament fishing line humming and fiberglass rod creaking under heavy strain, close-mic foley, no voice, no music" },
+    { "key": "line_snap", "variants": 2, "seconds": 1.0, "prompt": "taut nylon fishing line snapping sharply like a whip crack followed by water recoil splash, crisp outdoor foley, no voice, no music" },
+    { "key": "landing_lift", "variants": 2, "seconds": 1.4, "prompt": "heavy wet fish lifted out of ocean water with dripping spray and wet flop onto weathered wooden pier planks, coastal foley, no voice, no music" },
+    { "key": "ambush_alert", "variants": 2, "seconds": 1.3, "prompt": "ominous deep underwater sea predator surging swiftly through dark water with muffled low rumble and bubbles, cinematic water foley, no voice, no music" },
+    { "key": "predator_chomp", "variants": 2, "seconds": 1.5, "prompt": "large underwater predator jaws snapping shut with heavy bite crunch and turbulent splash shockwave, realistic foley, no voice, no music" },
+    { "key": "pier_creak", "variants": 2, "seconds": 0.8, "prompt": "weathered wooden harbor pier plank creaking softly underfoot, warm close-mic wood foley, no voice, no music" },
+    { "key": "seabed_tap", "variants": 2, "seconds": 0.6, "prompt": "small lead fishing sinker tapping softly onto submerged ocean floor sand and pebbles with a single bubble, muffled underwater foley, no voice, no music" },
+    { "key": "coins", "variants": 3, "seconds": 0.9, "prompt": "several real heavy brass gold coins clinking crisply together on a wooden tackle counter, dry close-mic metallic foley, no voice, no music" },
+    { "key": "amb_seagull", "variants": 2, "seconds": 2.0, "prompt": "distant coastal seagull calling twice over calm open harbor water with light wind, natural outdoor ambience, no voice, no music" },
+    { "key": "amb_ice", "variants": 2, "seconds": 1.8, "prompt": "distant arctic fjord glacier ice groaning and cracking sharply across cold open water, crisp atmospheric foley, no voice, no music" },
+    { "key": "amb_lava", "variants": 2, "seconds": 1.6, "prompt": "volcanic caldera lava bubble popping softly with a short steam vent hiss over dark water, atmospheric foley, no voice, no music" }
+  ]
+}
