@@ -506,15 +506,22 @@ class PierlineGame {
   selectMap(mapId, forceUnlock = false) {
     const target = getMapById(mapId);
     if (!target) return;
+    let newlyUnlocked = false;
     if (!this.save.unlockedMaps.includes(target.id)) {
       if (!forceUnlock) {
-        if (this.save.coins < target.cost) return;
+        if (this.save.coins < target.cost) {
+          sound.playUiError();
+          return;
+        }
         this.save.coins -= target.cost;
       }
       this.save.unlockedMaps.push(target.id);
-      sound.playBuy();
+      newlyUnlocked = true;
+    }
+    if (newlyUnlocked && !forceUnlock) {
+      sound.playMapUnlock();
     } else {
-      sound.playJig();
+      sound.playMapTravel(target.id);
     }
 
     this.save.currentMap = target.id;
@@ -581,6 +588,10 @@ class PierlineGame {
     const maxX = this.vw - 10;
     const x = fromEdge ? (dir > 0 ? minX - 12 : maxX + 14) : rand(minX, maxX);
 
+    if (fromEdge && species.rarity === 'myth') {
+      sound.playMythSpawn();
+    }
+
     return {
       species,
       x,
@@ -618,7 +629,7 @@ class PierlineGame {
       tabs.forEach((tab) => {
         tab.addEventListener('click', () => {
           sound.unlock();
-          sound.playJig();
+          sound.playUiTab();
           const target = tab.dataset.admTab;
           this.admActiveTab = target;
           tabs.forEach((t) => {
@@ -638,7 +649,7 @@ class PierlineGame {
       filters.forEach((btn) => {
         btn.addEventListener('click', () => {
           sound.unlock();
-          sound.playJig();
+          sound.playUiClick();
           this.admFishFilter = btn.dataset.admFilter;
           filters.forEach((f) => f.classList.toggle('is-active', f === btn));
           this.populateAdminFishSelect();
@@ -674,15 +685,21 @@ class PierlineGame {
     }
 
     if (this.el.admFishSelect) {
-      this.el.admFishSelect.addEventListener('change', () => this.updateAdminFishPreview());
+      this.el.admFishSelect.addEventListener('change', () => {
+        sound.unlock();
+        sound.playUiClick();
+        this.updateAdminFishPreview();
+      });
     }
     this.populateAdminFishSelect();
 
     // Live Time-of-Day Scrubber Slider
     if (this.el.admTodSlider) {
       this.el.admTodSlider.addEventListener('input', () => {
+        sound.unlock();
         const val = Number(this.el.admTodSlider.value) / 100;
         this.timeOfDay = clamp(val, 0, 0.999);
+        sound.playSliderTick(this.timeOfDay);
         this.refreshAdminLabels();
       });
     }
@@ -706,7 +723,7 @@ class PierlineGame {
     bind(this.el.admTodFreeze, () => {
       this.devClockFrozen = !this.devClockFrozen;
       this.setAdminStatus(this.devClockFrozen ? 'CLOCK PAUSED' : 'CLOCK RUNNING');
-      sound.playJig();
+      sound.playToggle(this.devClockFrozen);
     });
 
     bind(this.el.admSpawnFish, () => {
@@ -723,14 +740,16 @@ class PierlineGame {
     bind(this.el.admNoSnap, () => {
       this.devNoSnap = !this.devNoSnap;
       this.setAdminStatus(this.devNoSnap ? 'NO SNAP ENABLED' : 'NO SNAP OFF');
-      sound.playJig();
+      sound.playToggle(this.devNoSnap);
     });
     bind(this.el.admAutoLand, () => {
       if (this.state === 'REELING') {
         this.devAutoLand = true;
+        sound.playToggle(true);
         this.closeModals();
         this.spawnFloat(this.vw * 0.5, this.waterY - 12, 'AUTO-REEL ON', '#38bdf8');
       } else {
+        sound.playUiError();
         this.setAdminStatus('HOOK A FISH FIRST', true);
       }
     });
@@ -765,7 +784,7 @@ class PierlineGame {
     if (!sp) return;
     const meta = RARITY_META[sp.rarity] || RARITY_META.common;
     if (this.el.admFishImg) {
-      this.el.admFishImg.src = this.sprites.fish[sp.id]?.previewUrl || '';
+      this.el.admFishImg.src = (this.spriteUrls && this.spriteUrls[sp.id]) || '';
       this.el.admFishImg.alt = sp.name;
     }
     if (this.el.admFishName) this.el.admFishName.textContent = sp.name.toUpperCase();
@@ -837,14 +856,14 @@ class PierlineGame {
     this.save.coins += amount;
     this.persist();
     this.updateHUD();
-    sound.playBuy();
+    sound.playCoinJingle(amount >= 1000);
     this.setAdminStatus(`+${amount} G`);
   }
 
   adminUnlockAllMaps() {
     this.save.unlockedMaps = MAPS.map((m) => m.id);
     this.persist();
-    sound.playBuy();
+    sound.playMapUnlock();
     this.setAdminStatus('ALL 5 MAPS UNLOCKED');
   }
 
@@ -854,13 +873,14 @@ class PierlineGame {
     this.save.upgrades = maxed;
     this.persist();
     this.updateReelSweetZoneUI();
-    sound.playBuy();
+    sound.playMaxUpgrade();
     this.setAdminStatus(`ALL ${UPGRADES.length} GEAR LV 5`);
   }
 
   adminForceAmbush() {
     if (this.state !== 'REELING' || !this.activeFish) {
-      this.setAdminStatus('HOOK A SMALL FISH FIRST');
+      sound.playUiError();
+      this.setAdminStatus('HOOK A SMALL FISH FIRST', true);
       return null;
     }
     const prey = this.activeFish;
@@ -872,7 +892,8 @@ class PierlineGame {
         ? candidates[Math.floor(Math.random() * candidates.length)]
         : FISH_SPECIES.find((sp) => canPredatorEat(sp, prey.species));
       if (!chosen) {
-        this.setAdminStatus('ALREADY APEX FISH!');
+        sound.playUiError();
+        this.setAdminStatus('ALREADY APEX FISH!', true);
         return null;
       }
       pred = this.spawnFish(false, chosen);
@@ -896,7 +917,7 @@ class PierlineGame {
       }
     }
     this.persist();
-    sound.playBuy();
+    sound.playNewSpecies();
     this.setAdminStatus(`LOG ${FISH_SPECIES.length}/${FISH_SPECIES.length}`);
   }
 
@@ -904,6 +925,7 @@ class PierlineGame {
     this.save = defaultSave();
     this.persist();
     this.devAutoLand = false;
+    sound.playReset();
     this.selectMap('harbor', true);
     this.setAdminStatus('SAVE RESET');
   }
@@ -911,7 +933,7 @@ class PierlineGame {
   adminSetTime(tod) {
     this.timeOfDay = tod;
     this.updateHUD();
-    sound.playJig();
+    sound.playTimeShift(this.getTimePhaseLabel(tod));
     this.setAdminStatus(`TIME ${this.el.time.textContent}`);
   }
 
@@ -920,7 +942,8 @@ class PierlineGame {
     const f = this.spawnFish(false, sp);
     f.x = clamp(this.pierEndX + (this.vw - this.pierEndX) * 0.55, this.pierEndX + 24, this.vw - 18);
     this.fishes.push(f);
-    sound.playJig();
+    if (sp.rarity === 'myth') sound.playMythSpawn();
+    else sound.playSplash(sp.rarity === 'legendary');
     this.closeModals();
     this.spawnFloat(f.x, this.waterY - 10, `SPAWNED ${sp.name.toUpperCase()}`, '#c084fc');
     return f;
@@ -950,7 +973,7 @@ class PierlineGame {
     this.state = 'BITE';
     this.biteTimer = 2.6;
     this.closeModals();
-    sound.playBite();
+    sound.playBite(sp.rarity);
     this.spawnSplash(this.bobberX, this.waterY, 8);
     this.spawnRipple(this.bobberX, this.waterY);
     this.updateControlsUI();
@@ -996,6 +1019,8 @@ class PierlineGame {
       if (e.code === 'Space' || e.code === 'Enter') {
         if (this.state === 'CAUGHT') {
           e.preventDefault();
+          sound.unlock();
+          sound.playUiClose();
           this.dismissCatch();
           return;
         }
@@ -1004,12 +1029,20 @@ class PierlineGame {
         sound.unlock();
         this.onPrimaryDown();
       } else if (e.code === 'Escape') {
+        if (this.activeModal) {
+          sound.unlock();
+          sound.playUiClose();
+        }
         this.closeModals();
       } else if (e.code === 'KeyM') {
-        this.activeModal === 'maps' ? this.closeModals() : this.openModal('maps');
+        sound.unlock();
+        if (this.activeModal === 'maps') { sound.playUiClose(); this.closeModals(); }
+        else { sound.playUiOpen(); this.openModal('maps'); }
       } else if (e.code === 'Backquote' || e.code === 'F9') {
         e.preventDefault();
-        this.activeModal === 'admin' ? this.closeModals() : this.openModal('admin');
+        sound.unlock();
+        if (this.activeModal === 'admin') { sound.playUiClose(); this.closeModals(); }
+        else { sound.playUiOpen(); this.openModal('admin'); }
       }
     });
 
@@ -1020,35 +1053,35 @@ class PierlineGame {
     });
 
     this.el.btnMaps.addEventListener('click', () => {
-      sound.unlock(); sound.playJig(); this.openModal('maps');
+      sound.unlock(); sound.playUiOpen(); this.openModal('maps');
     });
     this.el.btnShop.addEventListener('click', () => {
-      sound.unlock(); sound.playJig(); this.openModal('shop');
+      sound.unlock(); sound.playUiOpen(); this.openModal('shop');
     });
     this.el.btnLog.addEventListener('click', () => {
-      sound.unlock(); sound.playJig(); this.openModal('log');
+      sound.unlock(); sound.playUiOpen(); this.openModal('log');
     });
     this.el.btnAdmin.addEventListener('click', () => {
-      sound.unlock(); sound.playJig(); this.openModal('admin');
+      sound.unlock(); sound.playUiOpen(); this.openModal('admin');
     });
     this.el.btnSound.addEventListener('click', () => {
       sound.unlock();
       this.save.sound = !this.save.sound;
       sound.setMuted(!this.save.sound);
-      if (this.save.sound) sound.playJig();
+      if (this.save.sound) sound.playToggle(true);
       this.persist();
       this.updateHUD();
     });
 
-    this.el.btnCatchOk.addEventListener('click', () => { sound.playJig(); this.dismissCatch(); });
-    this.el.btnMapsClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
-    this.el.btnShopClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
-    this.el.btnLogClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
-    this.el.btnAdminClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
+    this.el.btnCatchOk.addEventListener('click', () => { sound.playUiClose(); this.dismissCatch(); });
+    this.el.btnMapsClose.addEventListener('click', () => { sound.playUiClose(); this.closeModals(); });
+    this.el.btnShopClose.addEventListener('click', () => { sound.playUiClose(); this.closeModals(); });
+    this.el.btnLogClose.addEventListener('click', () => { sound.playUiClose(); this.closeModals(); });
+    this.el.btnAdminClose.addEventListener('click', () => { sound.playUiClose(); this.closeModals(); });
 
     for (const backdrop of [this.el.mapsModal, this.el.shopModal, this.el.logModal, this.el.adminModal]) {
       backdrop.addEventListener('click', (e) => {
-        if (e.target === backdrop) { sound.playJig(); this.closeModals(); }
+        if (e.target === backdrop) { sound.playUiClose(); this.closeModals(); }
       });
     }
   }
@@ -1059,9 +1092,11 @@ class PierlineGame {
       this.chargeHold = true;
       this.chargePower = 0.08;
       this.chargeDir = 1;
+      sound.playCastStart();
       this.updateControlsUI();
     } else if (this.state === 'WAITING') {
       this.retrieving = true;
+      sound.playRetrieveStart();
       this.updateControlsUI();
     } else if (this.state === 'BITE') {
       this.hookFish();
@@ -1104,7 +1139,7 @@ class PierlineGame {
     this.castT = 0;
     this.castFollowThrough = 0.24;
     this.state = 'CASTING';
-    sound.playCast();
+    sound.playCast(this.chargePower);
     this.updateControlsUI();
   }
 
@@ -1286,7 +1321,7 @@ class PierlineGame {
     }
     this.spawnSplash(this.activeFish.x, this.waterY, 12);
     this.spawnRipple(this.activeFish.x, this.waterY);
-    sound.playSplash(true);
+    sound.playLandingLift();
     this.updateControlsUI();
   }
 
@@ -1334,6 +1369,8 @@ class PierlineGame {
     this.state = 'CAUGHT';
     this.activeModal = 'catch';
     sound.playCatch(sp.rarity);
+    if (isNew) sound.playNewSpecies();
+    else if (isRecord) sound.playNewRecord();
 
     const rMeta = RARITY_META[sp.rarity] || RARITY_META.common;
     this.el.catchRarity.textContent = rMeta.label;
@@ -1468,7 +1505,8 @@ class PierlineGame {
           this.save.upgrades[u.id] = lv + 1;
           this.persist();
           this.updateReelSweetZoneUI();
-          sound.playBuy();
+          if (lv + 1 >= u.maxLevel) sound.playMaxUpgrade();
+          else sound.playBuy();
           this.updateHUD();
           this.renderShop();
         });
@@ -1790,6 +1828,7 @@ class PierlineGame {
         maxLife: 0.78,
         color: meteorColors[Math.floor(Math.random() * meteorColors.length)],
       });
+      if (!this.activeModal) sound.playShootingStar();
     }
     for (let i = this.shootingStars.length - 1; i >= 0; i--) {
       const st = this.shootingStars[i];
@@ -1814,6 +1853,7 @@ class PierlineGame {
       if (this.chargePower >= 1) { this.chargePower = 1; this.chargeDir = -1; }
       if (this.chargePower <= 0.08) { this.chargePower = 0.08; this.chargeDir = 1; }
       this.rodFlex = lerp(this.rodFlex, 0.14 * this.chargePower, 1 - Math.exp(-8 * dt));
+      sound.playCastCharge(this.chargePower);
     } else if (this.state === 'CASTING') {
       this.castT += dt * 1.65;
       const t = clamp(this.castT, 0, 1);
@@ -1865,7 +1905,7 @@ class PierlineGame {
         if (Math.abs(this.bobberX - pierEdgeX) <= 3 && this.hookY <= this.waterY + 5.5) {
           this.retrieving = false;
           this.spawnSplash(this.bobberX, this.waterY, 5);
-          sound.playSplash(false);
+          sound.playRetrieveFinish();
           this.resetToIdle('LURE REELED IN');
         }
       } else {
@@ -1888,7 +1928,7 @@ class PierlineGame {
       }
       if (Math.random() < dt * 8) this.spawnRipple(this.bobberX, this.waterY);
       if (this.biteTimer <= 0) {
-        sound.playSnap();
+        sound.playEscape();
         this.resetToIdle('GOT AWAY!');
       }
     } else if (this.state === 'REELING') {
@@ -1970,7 +2010,7 @@ class PierlineGame {
         this.fishFightState = 'WARNING';
         this.fishThrashing = false;
         this.fishFightTimer = 0.45;
-        sound.playNibble();
+        sound.playFishWarning();
         this.updateControlsUI();
       } else if (this.fishFightState === 'WARNING') {
         this.fishFightState = 'THRASH';
@@ -1978,6 +2018,7 @@ class PierlineGame {
         // Fish tires progressively over the fight as stamina drains!
         const tireFactor = clamp(this.fishStamina, 0.45, 1.35);
         this.fishFightTimer = rand(0.55, 0.78 + strength * 0.22) * tireFactor;
+        sound.playFishThrash();
         this.spawnSplash(this.bobberX, this.waterY, 6);
         this.updateControlsUI();
       } else {
@@ -1985,6 +2026,7 @@ class PierlineGame {
         this.fishThrashing = false;
         this.fishStamina = Math.max(0.42, this.fishStamina - stats.staminaDrain);
         this.fishFightTimer = rand(0.95, 1.55 - Math.min(0.4, strength * 0.12));
+        sound.playFishCalm();
         this.updateControlsUI();
       }
     }
@@ -2027,12 +2069,13 @@ class PierlineGame {
       const tickGap = this.inSweetSpot ? 0.095 : 0.13;
       if (this.reelTickAccum > tickGap) {
         this.reelTickAccum = 0;
-        sound.playReelTick(this.tension);
+        sound.playReelTick(this.tension, this.inSweetSpot);
       }
     } else {
       // Responsive tension cooling when player eases up
       const cool = stats.tensionDecay * (this.fishThrashing ? 0.95 : 1.35);
       this.tension = Math.max(0, this.tension - cool * dt);
+      if (this.fishThrashing) sound.playDragOut(this.tension);
     }
 
     // Organic fish fight / swimming resistance
@@ -2275,7 +2318,7 @@ class PierlineGame {
           this.activeFish = f;
           this.state = 'BITE';
           this.biteTimer = clamp(1.55 - f.species.strength * 0.08 + stats.biteBonus, 1.0, 2.1);
-          sound.playBite();
+          sound.playBite(f.species.rarity);
           this.spawnSplash(this.bobberX, this.waterY, 8);
           this.spawnRipple(this.bobberX, this.waterY);
           this.updateControlsUI();
@@ -2302,6 +2345,7 @@ class PierlineGame {
             f.ai = 'CURIOUS';
             f.inspectSide = f.x <= this.hookX ? -1 : 1;
             f.inspectTimer = rand(0.35, 0.65);
+            sound.playFishCurious();
             engagedCount = 1;
           }
         } else if (
