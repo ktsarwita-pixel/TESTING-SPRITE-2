@@ -262,21 +262,36 @@ class PierlineGame {
       adminModal: document.getElementById('admin-modal'),
       adminStatus: document.getElementById('admin-status'),
       btnAdminClose: document.getElementById('btn-admin-close'),
+      admTelSwatch: document.getElementById('adm-tel-swatch'),
+      admTelMap: document.getElementById('adm-tel-map'),
+      admTelState: document.getElementById('adm-tel-state'),
+      admTelTime: document.getElementById('adm-tel-time'),
+      admTelGold: document.getElementById('adm-tel-gold'),
+      admTelFish: document.getElementById('adm-tel-fish'),
       admGold100: document.getElementById('adm-gold-100'),
       admGold1000: document.getElementById('adm-gold-1000'),
+      admGold10000: document.getElementById('adm-gold-10000'),
       admUnlockMaps: document.getElementById('adm-unlock-maps'),
       admMaxGear: document.getElementById('adm-max-gear'),
       admFillLog: document.getElementById('adm-fill-log'),
       admReset: document.getElementById('adm-reset'),
       admMapRow: document.getElementById('adm-map-row'),
+      admTodReadout: document.getElementById('adm-tod-readout'),
+      admTodSlider: document.getElementById('adm-tod-slider'),
       admTodDawn: document.getElementById('adm-tod-dawn'),
       admTodDay: document.getElementById('adm-tod-day'),
       admTodSunset: document.getElementById('adm-tod-sunset'),
       admTodNight: document.getElementById('adm-tod-night'),
       admTodFreeze: document.getElementById('adm-tod-freeze'),
       admFishSelect: document.getElementById('adm-fish-select'),
+      admFishImg: document.getElementById('adm-fish-img'),
+      admFishName: document.getElementById('adm-fish-name'),
+      admFishRarity: document.getElementById('adm-fish-rarity'),
+      admFishStats: document.getElementById('adm-fish-stats'),
+      admFishMaps: document.getElementById('adm-fish-maps'),
       admSpawnFish: document.getElementById('adm-spawn-fish'),
       admForceBite: document.getElementById('adm-force-bite'),
+      admSpawnMyth: document.getElementById('adm-spawn-myth'),
       admNoSnap: document.getElementById('adm-nosnap'),
       admAutoLand: document.getElementById('adm-autoland'),
       admForceAmbush: document.getElementById('adm-force-ambush'),
@@ -590,32 +605,95 @@ class PierlineGame {
     }
   }
 
-  // ── Admin / Dev Test Panel ────────────────────────────────────────────────
+  // ── Admin / Dev Console ───────────────────────────────────────────────────
   initAdminUI() {
-    if (this.el.admFishSelect) {
-      this.el.admFishSelect.innerHTML = FISH_SPECIES.map(
-        (sp) => `<option value="${sp.id}">${sp.name} (${RARITY_META[sp.rarity].label})</option>`
-      ).join('');
+    this.admActiveTab = 'world';
+    this.admFishFilter = 'all';
+    this.admMapButtons = {};
+
+    // Tab switching
+    if (this.el.adminModal && typeof this.el.adminModal.querySelectorAll === 'function') {
+      const tabs = this.el.adminModal.querySelectorAll('[data-adm-tab]');
+      const panes = this.el.adminModal.querySelectorAll('[data-adm-pane]');
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          sound.unlock();
+          sound.playJig();
+          const target = tab.dataset.admTab;
+          this.admActiveTab = target;
+          tabs.forEach((t) => {
+            const on = t.dataset.admTab === target;
+            t.classList.toggle('is-active', on);
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+          });
+          panes.forEach((p) => {
+            p.classList.toggle('hidden', p.dataset.admPane !== target);
+          });
+          this.refreshAdminLabels();
+        });
+      });
+
+      // Fish species filter pills
+      const filters = this.el.adminModal.querySelectorAll('[data-adm-filter]');
+      filters.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          sound.unlock();
+          sound.playJig();
+          this.admFishFilter = btn.dataset.admFilter;
+          filters.forEach((f) => f.classList.toggle('is-active', f === btn));
+          this.populateAdminFishSelect();
+        });
+      });
     }
+
+    // Biome warp mini-cards with color swatches
     if (this.el.admMapRow) {
       this.el.admMapRow.innerHTML = '';
       for (const m of MAPS) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'pixel-btn';
-        b.textContent = m.shortTag;
+        b.className = 'pixel-btn adm-map-btn';
         b.title = `Warp to ${m.name}`;
-        b.addEventListener('click', () => this.selectMap(m.id, true));
+        const dot = document.createElement('span');
+        dot.className = 'adm-map-dot';
+        dot.style.background = m.accent || '#38bdf8';
+        const lbl = document.createElement('span');
+        lbl.className = 'adm-map-name';
+        lbl.textContent = m.name.toUpperCase();
+        b.appendChild(dot);
+        b.appendChild(lbl);
+        b.addEventListener('click', () => {
+          sound.unlock();
+          this.selectMap(m.id, true);
+          this.populateAdminFishSelect();
+          this.refreshAdminLabels();
+        });
         this.el.admMapRow.appendChild(b);
+        this.admMapButtons[m.id] = b;
       }
     }
 
+    if (this.el.admFishSelect) {
+      this.el.admFishSelect.addEventListener('change', () => this.updateAdminFishPreview());
+    }
+    this.populateAdminFishSelect();
+
+    // Live Time-of-Day Scrubber Slider
+    if (this.el.admTodSlider) {
+      this.el.admTodSlider.addEventListener('input', () => {
+        const val = Number(this.el.admTodSlider.value) / 100;
+        this.timeOfDay = clamp(val, 0, 0.999);
+        this.refreshAdminLabels();
+      });
+    }
+
     const bind = (el, fn) => {
-      if (el) el.addEventListener('click', () => { sound.unlock(); fn(); });
+      if (el) el.addEventListener('click', () => { sound.unlock(); fn(); this.refreshAdminLabels(); });
     };
 
     bind(this.el.admGold100, () => this.adminAddGold(100));
     bind(this.el.admGold1000, () => this.adminAddGold(1000));
+    bind(this.el.admGold10000, () => this.adminAddGold(10000));
     bind(this.el.admUnlockMaps, () => this.adminUnlockAllMaps());
     bind(this.el.admMaxGear, () => this.adminMaxGear());
     bind(this.el.admFillLog, () => this.adminFillLog());
@@ -627,7 +705,7 @@ class PierlineGame {
     bind(this.el.admTodNight, () => this.adminSetTime(0.02));
     bind(this.el.admTodFreeze, () => {
       this.devClockFrozen = !this.devClockFrozen;
-      this.refreshAdminLabels();
+      this.setAdminStatus(this.devClockFrozen ? 'CLOCK PAUSED' : 'CLOCK RUNNING');
       sound.playJig();
     });
 
@@ -639,9 +717,12 @@ class PierlineGame {
       const id = this.el.admFishSelect ? this.el.admFishSelect.value : FISH_SPECIES[0].id;
       this.adminTriggerBite(id);
     });
+    bind(this.el.admSpawnMyth, () => {
+      this.adminSpawnSpecies('krakentitan');
+    });
     bind(this.el.admNoSnap, () => {
       this.devNoSnap = !this.devNoSnap;
-      this.refreshAdminLabels();
+      this.setAdminStatus(this.devNoSnap ? 'NO SNAP ENABLED' : 'NO SNAP OFF');
       sound.playJig();
     });
     bind(this.el.admAutoLand, () => {
@@ -650,24 +731,106 @@ class PierlineGame {
         this.closeModals();
         this.spawnFloat(this.vw * 0.5, this.waterY - 12, 'AUTO-REEL ON', '#38bdf8');
       } else {
-        this.setAdminStatus('HOOK A FISH FIRST');
+        this.setAdminStatus('HOOK A FISH FIRST', true);
       }
     });
     bind(this.el.admForceAmbush, () => this.adminForceAmbush());
     this.refreshAdminLabels();
   }
 
-  setAdminStatus(msg) {
-    if (this.el.adminStatus) this.el.adminStatus.textContent = msg;
+  populateAdminFishSelect() {
+    if (!this.el.admFishSelect) return;
+    const prev = this.el.admFishSelect.value;
+    const mapId = this.save.currentMap;
+    let list = FISH_SPECIES;
+    if (this.admFishFilter === 'map') {
+      list = FISH_SPECIES.filter((sp) => !sp.maps || sp.maps.includes(mapId));
+    } else if (this.admFishFilter === 'high') {
+      list = FISH_SPECIES.filter((sp) => sp.rarity === 'myth' || sp.rarity === 'legendary');
+    }
+    this.el.admFishSelect.innerHTML = list.map(
+      (sp) => `<option value="${sp.id}">${sp.name} · ${RARITY_META[sp.rarity].label} (${sp.value}G)</option>`
+    ).join('');
+    if (list.some((sp) => sp.id === prev)) {
+      this.el.admFishSelect.value = prev;
+    } else if (list.length) {
+      this.el.admFishSelect.value = list[0].id;
+    }
+    this.updateAdminFishPreview();
+  }
+
+  updateAdminFishPreview() {
+    const id = this.el.admFishSelect ? this.el.admFishSelect.value : FISH_SPECIES[0].id;
+    const sp = FISH_SPECIES.find((s) => s.id === id) || FISH_SPECIES[0];
+    if (!sp) return;
+    const meta = RARITY_META[sp.rarity] || RARITY_META.common;
+    if (this.el.admFishImg) {
+      this.el.admFishImg.src = this.sprites.fish[sp.id]?.previewUrl || '';
+      this.el.admFishImg.alt = sp.name;
+    }
+    if (this.el.admFishName) this.el.admFishName.textContent = sp.name.toUpperCase();
+    if (this.el.admFishRarity) {
+      this.el.admFishRarity.textContent = meta.label;
+      this.el.admFishRarity.style.color = meta.color;
+    }
+    if (this.el.admFishStats) {
+      this.el.admFishStats.textContent = `${sp.value} G · ${sp.minWeight}-${sp.maxWeight} lb · ${sp.zone}`;
+    }
+    if (this.el.admFishMaps) {
+      const mNames = (sp.maps || ['harbor']).map((mid) => getMapById(mid).name).join(', ');
+      this.el.admFishMaps.textContent = `Maps: ${mNames}`;
+    }
+  }
+
+  setAdminStatus(msg, isWarn = false) {
+    if (!this.el.adminStatus) return;
+    this.el.adminStatus.textContent = msg;
+    this.el.adminStatus.classList.toggle('is-warn', Boolean(isWarn));
+  }
+
+  getTimePhaseLabel(t) {
+    if (t >= 0.14 && t < 0.24) return 'DAWN';
+    if (t >= 0.24 && t < 0.68) return 'DAY';
+    if (t >= 0.68 && t < 0.82) return 'SUNSET';
+    return 'NIGHT';
   }
 
   refreshAdminLabels() {
+    const map = this.getCurrentMap();
+    const phase = this.getTimePhaseLabel(this.timeOfDay);
+    const totalMin = Math.floor(this.timeOfDay * 24 * 60);
+    const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, '0');
+    const mm = String(totalMin % 60).padStart(2, '0');
+
+    if (this.el.admTelSwatch) this.el.admTelSwatch.style.background = map.accent || '#38bdf8';
+    if (this.el.admTelMap) this.el.admTelMap.textContent = map.name.toUpperCase();
+    if (this.el.admTelState) this.el.admTelState.textContent = this.state;
+    if (this.el.admTelTime) this.el.admTelTime.textContent = `${hh}:${mm} ${phase}`;
+    if (this.el.admTelGold) this.el.admTelGold.textContent = String(this.save.coins);
+    if (this.el.admTelFish) this.el.admTelFish.textContent = String(this.fishes.length);
+
+    if (this.el.admTodReadout) {
+      this.el.admTodReadout.textContent = `${hh}:${mm} · ${phase}`;
+    }
+    if (this.el.admTodSlider) {
+      this.el.admTodSlider.value = String(Math.round(this.timeOfDay * 100));
+    }
+
+    if (this.admMapButtons) {
+      for (const [mid, btn] of Object.entries(this.admMapButtons)) {
+        btn.classList.toggle('is-current', mid === map.id);
+      }
+    }
+
     if (this.el.admTodFreeze) {
       this.el.admTodFreeze.textContent = this.devClockFrozen ? 'CLOCK: PAUSED' : 'CLOCK: RUN';
+      this.el.admTodFreeze.classList.toggle('is-on', this.devClockFrozen);
     }
     if (this.el.admNoSnap) {
       this.el.admNoSnap.textContent = this.devNoSnap ? 'NO SNAP: ON' : 'NO SNAP: OFF';
+      this.el.admNoSnap.classList.toggle('is-on', this.devNoSnap);
     }
+    this.updateAdminFishPreview();
   }
 
   adminAddGold(amount) {

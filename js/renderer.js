@@ -504,34 +504,40 @@ function renderHorizon(g, ctx, map, pal) {
   if (pal.night > 0.2) {
     const cx = isleX + 7;
     const cy = lhY + 2;
-    const rot = g.time * 0.95; // Smooth 360-degree rotating dual Fresnel lens
-    const flash = Math.pow(Math.max(0, Math.abs(Math.cos(rot))), 4); // Realistic lens flash as beam sweeps past viewer
+    // Serene coastal Fresnel rotation (100% C-infinity smooth — zero contrast jumps or snapping!)
+    const rot = g.time * 0.62;
+    const cosR = Math.cos(rot);
+    const flash = Math.pow(Math.abs(cosR), 3.0);
 
     ctx.save();
-    // Dual opposing Fresnel beams (180° apart) with smooth volumetric distance falloff (no hard cutoff!)
+    // Dual opposing Fresnel beams (180° apart) with continuous 3D depth modulation & smooth fade-to-zero
     for (let b = 0; b < 2; b++) {
       const ang = rot + b * Math.PI;
-      const side = Math.sin(ang); // -1 = full left, 0 = straight toward/away, +1 = full right
-      const facing = Math.cos(ang); // >0 = front half (brighter), <0 = back half (softer)
+      const side = Math.sin(ang);     // -1 (full left) -> 0 (center) -> +1 (full right)
+      const facing = Math.cos(ang);   // +1 (toward viewer) -> 0 (broadside) -> -1 (behind)
       const sideMag = Math.abs(side);
-      if (sideMag < 0.08) continue;
+
+      // Smooth continuous depth factor from 0.45 (back) -> 0.725 (broadside) -> 1.0 (front): ZERO jump at facing=0!
+      const depthDim = 0.45 + 0.55 * (0.5 + 0.5 * facing);
+      // Smooth sine-squared envelope so beam glides to 0 brightness before reversing direction
+      const beamStrength = sideMag * sideMag * depthDim * pal.night;
+      if (beamStrength < 0.004) continue;
 
       const dir = side >= 0 ? 1 : -1;
-      const maxLen = Math.round((g.isPortrait ? 46 : 74) * sideMag);
-      const depthDim = facing >= 0 ? 1.0 : 0.42;
+      const maxLen = Math.round((g.isPortrait ? 46 : 74) * Math.pow(sideMag, 0.85));
+      if (maxLen < 3) continue;
 
       for (let d = 2; d <= maxLen; d++) {
         const x = cx + dir * d;
         if (x < 0 || x >= g.vw) break;
-        const frac = d / Math.max(1, maxLen);
-        // Smooth inverse-cubic atmospheric fade to 0 at tip (zero hard edge!)
-        const falloff = Math.pow(1 - frac, 1.85) * sideMag * depthDim * pal.night;
-        if (falloff < 0.008) continue;
+        const frac = d / maxLen;
+        // Smooth radial mist falloff to 0 at beam tip
+        const falloff = Math.pow(1 - frac, 2.0) * beamStrength;
+        if (falloff < 0.005) continue;
 
-        // Beam dips gently toward the distant bay horizon
-        const beamY = cy + d * 0.045;
-        const outerHalf = 1.0 + d * 0.115;
-        const coreHalf = 0.55 + d * 0.045;
+        const beamY = cy + d * 0.04;
+        const outerHalf = 1.0 + d * 0.11;
+        const coreHalf = 0.5 + d * 0.042;
 
         const oy0 = Math.round(beamY - outerHalf);
         const oy1 = Math.min(wy - 1, Math.round(beamY + outerHalf));
@@ -545,23 +551,25 @@ function renderHorizon(g, ctx, map, pal) {
         const iy1 = Math.min(wy - 1, Math.round(beamY + coreHalf));
         if (iy1 >= iy0) {
           ctx.fillStyle = '#fef9c3';
-          ctx.globalAlpha = falloff * 0.24;
+          ctx.globalAlpha = falloff * 0.22;
           ctx.fillRect(x, iy0, 1, iy1 - iy0 + 1);
         }
       }
     }
 
-    // Soft circular warm Fresnel lamp glow + crisp lens flash glint when facing viewer
-    drawPixelHalo(ctx, cx, cy, 7, '#facc15', pal.night * (0.10 + 0.14 * flash));
-    drawPixelHalo(ctx, cx, cy, 4, '#fef08a', pal.night * (0.24 + 0.28 * flash));
-    drawPixelHalo(ctx, cx, cy, 2, '#fef9c3', pal.night * (0.62 + 0.34 * flash));
-    if (flash > 0.32) {
-      const flare = (flash - 0.32) / 0.68;
-      const arm = Math.round(2 + flare * 3);
+    // Continuous smooth circular lamp bloom & soft forward Fresnel glint (no threshold snap!)
+    drawPixelHalo(ctx, cx, cy, 7, '#facc15', pal.night * (0.09 + 0.11 * flash));
+    drawPixelHalo(ctx, cx, cy, 4, '#fef08a', pal.night * (0.20 + 0.24 * flash));
+    drawPixelHalo(ctx, cx, cy, 2, '#fef9c3', pal.night * (0.56 + 0.36 * flash));
+    if (flash > 0.05) {
+      ctx.fillStyle = '#fef9c3';
+      ctx.globalAlpha = pal.night * flash * 0.62;
+      ctx.fillRect(cx - 4, cy, 9, 1);
+      ctx.fillRect(cx, cy - 3, 1, 7);
       ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = pal.night * flare * 0.85;
-      ctx.fillRect(cx - arm, cy, arm * 2 + 1, 1);
-      ctx.fillRect(cx, cy - Math.max(1, arm - 1), 1, Math.max(1, arm - 1) * 2 + 1);
+      ctx.globalAlpha = pal.night * flash * 0.85;
+      ctx.fillRect(cx - 2, cy, 5, 1);
+      ctx.fillRect(cx, cy - 1, 1, 3);
     }
     ctx.restore();
   }
@@ -1234,12 +1242,12 @@ function renderWaterSurface(g, ctx, map, pal, cel) {
     // 2) Horizon landmark reflections
     if (map.id === 'harbor') {
       const isleX = g.vw - (g.isPortrait ? 38 : 64) + 7;
-      const flash = Math.pow(Math.max(0, Math.abs(Math.cos(g.time * 0.95))), 4);
+      const flash = Math.pow(Math.abs(Math.cos(g.time * 0.62)), 3.0);
       ctx.fillStyle = '#fef08a';
       for (let r = 0; r < 4; r++) {
-        ctx.globalAlpha = pal.night * (0.22 + 0.34 * flash) * (1 - r * 0.22);
-        const w = Math.round((6 + flash * 4) - r * 1.6);
-        if (w > 0) ctx.fillRect(isleX - Math.floor(w / 2) + Math.round(Math.sin(g.time * 3 + r) * 1.5), wy + 1 + r * 2, w, 1);
+        ctx.globalAlpha = pal.night * (0.20 + 0.28 * flash) * (1 - r * 0.22);
+        const w = Math.round((6 + flash * 3) - r * 1.5);
+        if (w > 0) ctx.fillRect(isleX - Math.floor(w / 2) + Math.round(Math.sin(g.time * 2.6 + r) * 1.5), wy + 1 + r * 2, w, 1);
       }
     } else if (map.id === 'fjord') {
       // Emerald-aqua & violet aurora borealis reflections rippling across dark fjord waves!

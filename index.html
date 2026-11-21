@@ -138,58 +138,174 @@
       </div>
     </div>
 
-    <!-- Admin / Dev Test Panel modal -->
+    <!-- Admin / Dev Console modal -->
     <div id="admin-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="admin-title">
-      <div class="pixel-panel modal-panel">
-        <div class="modal-header">
-          <h2 id="admin-title">ADMIN TEST PANEL</h2>
-          <span id="admin-status" class="modal-sub">DEV TOOLS</span>
+      <div class="pixel-panel modal-panel admin-panel">
+        <div class="modal-header admin-header">
+          <div class="admin-title-wrap">
+            <span class="admin-badge">DEV</span>
+            <h2 id="admin-title">ADMIN CONSOLE</h2>
+          </div>
+          <span id="admin-status" class="admin-toast">READY</span>
           <button id="btn-admin-close" class="pixel-btn close-btn" type="button" aria-label="Close Admin Panel">X</button>
         </div>
+
+        <!-- Live Telemetry Bar -->
+        <div id="adm-telemetry" class="admin-telemetry">
+          <span class="adm-stat"><span id="adm-tel-swatch" class="adm-swatch"></span><b id="adm-tel-map">HARBOR</b></span>
+          <span class="adm-stat">STATE <b id="adm-tel-state" class="c-cyan">IDLE</b></span>
+          <span class="adm-stat">TIME <b id="adm-tel-time" class="c-gold">DAY</b></span>
+          <span class="adm-stat">GOLD <b id="adm-tel-gold" class="c-gold">0</b></span>
+          <span class="adm-stat">FISH <b id="adm-tel-fish" class="c-teal">0</b></span>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="admin-tabs" role="tablist" aria-label="Admin sections">
+          <button class="admin-tab is-active" data-adm-tab="world" role="tab" aria-selected="true" type="button">WORLD</button>
+          <button class="admin-tab" data-adm-tab="fish" role="tab" aria-selected="false" type="button">FISH</button>
+          <button class="admin-tab" data-adm-tab="gear" role="tab" aria-selected="false" type="button">GEAR</button>
+          <button class="admin-tab" data-adm-tab="reel" role="tab" aria-selected="false" type="button">REEL</button>
+        </div>
+
         <div class="modal-body admin-body">
-          <div class="admin-section">
-            <div class="admin-label">GOLD &amp; PROGRESSION</div>
-            <div class="admin-row">
-              <button id="adm-gold-100" class="pixel-btn accent-gold" type="button">+100 G</button>
-              <button id="adm-gold-1000" class="pixel-btn accent-gold" type="button">+1000 G</button>
-              <button id="adm-unlock-maps" class="pixel-btn accent-cyan" type="button">ALL MAPS</button>
-              <button id="adm-max-gear" class="pixel-btn accent-cyan" type="button">MAX GEAR</button>
-              <button id="adm-fill-log" class="pixel-btn" type="button">FILL LOG</button>
-              <button id="adm-reset" class="pixel-btn danger-btn" type="button">RESET SAVE</button>
+          <!-- TAB 1: WORLD (Map Warp + Time Scrubber) -->
+          <div class="admin-pane" data-adm-pane="world">
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <span class="admin-label">INSTANT MAP WARP</span>
+                <span class="admin-hint">CLICK ANY BIOME</span>
+              </div>
+              <div id="adm-map-row" class="admin-map-grid"></div>
+            </div>
+
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <span class="admin-label">TIME &amp; SKY CYCLE</span>
+                <span id="adm-tod-readout" class="admin-hint">09:00 · DAY</span>
+              </div>
+              <div class="admin-slider-row">
+                <input id="adm-tod-slider" class="pixel-range" type="range" min="0" max="100" step="1" value="38" aria-label="Time of day slider" />
+              </div>
+              <div class="admin-tod-grid">
+                <button id="adm-tod-dawn" class="pixel-btn" type="button">DAWN</button>
+                <button id="adm-tod-day" class="pixel-btn" type="button">DAY</button>
+                <button id="adm-tod-sunset" class="pixel-btn" type="button">SUNSET</button>
+                <button id="adm-tod-night" class="pixel-btn" type="button">NIGHT</button>
+              </div>
+              <div class="admin-toggle-row">
+                <div class="admin-toggle-info">
+                  <div class="admin-toggle-title">DAY/NIGHT CLOCK</div>
+                  <div class="admin-toggle-desc">Freeze sky cycle at the chosen hour</div>
+                </div>
+                <button id="adm-tod-freeze" class="pixel-btn adm-pill-btn" type="button">CLOCK: RUN</button>
+              </div>
             </div>
           </div>
 
-          <div class="admin-section">
-            <div class="admin-label">INSTANT MAP WARP</div>
-            <div id="adm-map-row" class="admin-row"></div>
-          </div>
+          <!-- TAB 2: FISH SPAWNER & PREVIEW -->
+          <div class="admin-pane hidden" data-adm-pane="fish">
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <span class="admin-label">SPECIES INSPECTOR &amp; SPAWNER</span>
+                <div class="admin-filter-pills">
+                  <button class="adm-filter is-active" data-adm-filter="all" type="button">ALL</button>
+                  <button class="adm-filter" data-adm-filter="map" type="button">THIS MAP</button>
+                  <button class="adm-filter" data-adm-filter="high" type="button">MYTH/LEG</button>
+                </div>
+              </div>
 
-          <div class="admin-section">
-            <div class="admin-label">TIME OF DAY</div>
-            <div class="admin-row">
-              <button id="adm-tod-dawn" class="pixel-btn" type="button">DAWN</button>
-              <button id="adm-tod-day" class="pixel-btn" type="button">DAY</button>
-              <button id="adm-tod-sunset" class="pixel-btn" type="button">SUNSET</button>
-              <button id="adm-tod-night" class="pixel-btn" type="button">NIGHT</button>
-              <button id="adm-tod-freeze" class="pixel-btn" type="button">CLOCK: RUN</button>
-            </div>
-          </div>
+              <div class="admin-fish-preview">
+                <div class="admin-fish-stage">
+                  <img id="adm-fish-img" src="" alt="Selected fish" />
+                </div>
+                <div class="admin-fish-meta">
+                  <div class="admin-fish-top">
+                    <span id="adm-fish-name" class="admin-fish-name">—</span>
+                    <span id="adm-fish-rarity" class="admin-fish-rarity">COMMON</span>
+                  </div>
+                  <div id="adm-fish-stats" class="admin-fish-stats">Base Value: 0 G · Size: 1.0x</div>
+                  <div id="adm-fish-maps" class="admin-fish-maps">Maps: —</div>
+                </div>
+              </div>
 
-          <div class="admin-section">
-            <div class="admin-label">SPAWN &amp; BITE TESTER</div>
-            <div class="admin-row">
               <select id="adm-fish-select" class="pixel-select" aria-label="Choose fish species"></select>
-              <button id="adm-spawn-fish" class="pixel-btn" type="button">SPAWN</button>
-              <button id="adm-force-bite" class="pixel-btn accent-purple" type="button">INSTANT BITE</button>
+
+              <div class="admin-action-grid">
+                <button id="adm-spawn-fish" class="pixel-btn accent-cyan" type="button">SPAWN IN WATER</button>
+                <button id="adm-force-bite" class="pixel-btn accent-purple" type="button">INSTANT BITE</button>
+                <button id="adm-spawn-myth" class="pixel-btn accent-gold" type="button">SPAWN MYTH</button>
+              </div>
             </div>
           </div>
 
-          <div class="admin-section">
-            <div class="admin-label">REELING HELPERS</div>
-            <div class="admin-row">
-              <button id="adm-nosnap" class="pixel-btn" type="button">NO SNAP: OFF</button>
-              <button id="adm-autoland" class="pixel-btn accent-cyan" type="button">AUTO-LAND ACTIVE</button>
-              <button id="adm-force-ambush" class="pixel-btn accent-gold" type="button">PREDATOR EAT</button>
+          <!-- TAB 3: GOLD & PROGRESSION -->
+          <div class="admin-pane hidden" data-adm-pane="gear">
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <span class="admin-label">TREASURY</span>
+                <span class="admin-hint">INSTANT COINS</span>
+              </div>
+              <div class="admin-action-grid">
+                <button id="adm-gold-100" class="pixel-btn accent-gold" type="button">+100 G</button>
+                <button id="adm-gold-1000" class="pixel-btn accent-gold" type="button">+1,000 G</button>
+                <button id="adm-gold-10000" class="pixel-btn accent-gold" type="button">+10,000 G</button>
+              </div>
+            </div>
+
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <span class="admin-label">PROGRESSION UNLOCKS</span>
+                <span class="admin-hint">TEST FULL BUILD</span>
+              </div>
+              <div class="admin-action-grid">
+                <button id="adm-unlock-maps" class="pixel-btn accent-cyan" type="button">ALL 5 MAPS</button>
+                <button id="adm-max-gear" class="pixel-btn accent-cyan" type="button">MAX ALL GEAR</button>
+                <button id="adm-fill-log" class="pixel-btn accent-purple" type="button">FILL FISH LOG</button>
+              </div>
+            </div>
+
+            <div class="admin-section admin-danger-zone">
+              <div class="admin-toggle-row">
+                <div class="admin-toggle-info">
+                  <div class="admin-toggle-title danger-text">WIPE LOCAL SAVE</div>
+                  <div class="admin-toggle-desc">Resets coins, gear, maps &amp; fish log</div>
+                </div>
+                <button id="adm-reset" class="pixel-btn danger-btn" type="button">RESET SAVE</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 4: REEL & COMBAT HELPERS -->
+          <div class="admin-pane hidden" data-adm-pane="reel">
+            <div class="admin-section">
+              <div class="admin-section-head">
+                <span class="admin-label">REELING &amp; EVENT TOOLS</span>
+                <span class="admin-hint">LIVE TESTING</span>
+              </div>
+
+              <div class="admin-toggle-row">
+                <div class="admin-toggle-info">
+                  <div class="admin-toggle-title">INVINCIBLE LINE</div>
+                  <div class="admin-toggle-desc">Prevents line from snapping at 100% tension</div>
+                </div>
+                <button id="adm-nosnap" class="pixel-btn adm-pill-btn" type="button">NO SNAP: OFF</button>
+              </div>
+
+              <div class="admin-toggle-row">
+                <div class="admin-toggle-info">
+                  <div class="admin-toggle-title">AUTO-LAND HOOKED FISH</div>
+                  <div class="admin-toggle-desc">Automatically reels in the currently hooked fish</div>
+                </div>
+                <button id="adm-autoland" class="pixel-btn accent-cyan adm-pill-btn" type="button">AUTO-LAND</button>
+              </div>
+
+              <div class="admin-toggle-row">
+                <div class="admin-toggle-info">
+                  <div class="admin-toggle-title">TRIGGER PREDATOR AMBUSH</div>
+                  <div class="admin-toggle-desc">Spawns a larger hunter to swallow your hooked fish</div>
+                </div>
+                <button id="adm-force-ambush" class="pixel-btn accent-gold adm-pill-btn" type="button">PREDATOR EAT</button>
+              </div>
             </div>
           </div>
         </div>
