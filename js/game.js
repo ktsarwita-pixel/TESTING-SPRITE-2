@@ -1,5 +1,5 @@
 // PIERLINE — 2D Pixel-Art Side-POV Fishing Game (Mobile + Desktop, Multi-Map, Realistic Reeling + Admin Panel)
-import { FISH_SPECIES, RARITY_META, UPGRADES, getUpgradeCost, getSpeciesById } from './fishData.js';
+import { FISH_SPECIES, RARITY_META, UPGRADES, getUpgradeCost, getSpeciesById, canPredatorEat } from './fishData.js';
 import { MAPS, getMapById } from './maps.js';
 import { buildSpriteCache, spriteToDataURL } from './sprites.js';
 import { renderGameWorld } from './renderer.js';
@@ -12,11 +12,17 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 const smoothstep = (t) => t * t * (3 - 2 * t);
 
+function defaultUpgrades() {
+  const out = {};
+  for (const u of UPGRADES) out[u.id] = 1;
+  return out;
+}
+
 function defaultSave() {
   return {
     coins: 0,
     totalCaught: 0,
-    upgrades: { rod: 1, line: 1, lure: 1, charm: 1 },
+    upgrades: defaultUpgrades(),
     log: {},
     currentMap: 'harbor',
     unlockedMaps: ['harbor'],
@@ -46,20 +52,19 @@ function sanitizeSave(rawObj) {
   }
 
   const u = rawObj.upgrades && typeof rawObj.upgrades === 'object' ? rawObj.upgrades : {};
-  const cleanUpgrade = (k) => {
+  const cleanUpgrade = (k, maxLv = 5) => {
     const v = Number(u[k]);
-    return Number.isFinite(v) ? clamp(Math.round(v), 1, 5) : 1;
+    return Number.isFinite(v) ? clamp(Math.round(v), 1, maxLv) : 1;
   };
+  const upgrades = {};
+  for (const upg of UPGRADES) {
+    upgrades[upg.id] = cleanUpgrade(upg.id, upg.maxLevel || 5);
+  }
 
   return {
     coins: Number.isFinite(Number(rawObj.coins)) && Number(rawObj.coins) >= 0 ? Math.round(Number(rawObj.coins)) : 0,
     totalCaught: Number.isFinite(Number(rawObj.totalCaught)) && Number(rawObj.totalCaught) >= 0 ? Math.round(Number(rawObj.totalCaught)) : 0,
-    upgrades: {
-      rod: cleanUpgrade('rod'),
-      line: cleanUpgrade('line'),
-      lure: cleanUpgrade('lure'),
-      charm: cleanUpgrade('charm'),
-    },
+    upgrades,
     log: cleanLog,
     currentMap,
     unlockedMaps: unlocked,
@@ -159,6 +164,13 @@ class PierlineGame {
     this.lastCatchInfo = null;
     this.catchTime = 0;
 
+    // Live-bait predator swallow tracking (bigger fish eating hooked smaller fish!)
+    this.eatenPrey = [];
+    this.swallowCount = 0;
+    this.ambushCooldown = 0;
+    this.swallowBannerTimer = 0;
+    this.swallowBannerText = '';
+
     // Admin / Dev test options
     this.devClockFrozen = false;
     this.devNoSnap = false;
@@ -188,6 +200,7 @@ class PierlineGame {
     this.populateFish();
     this.bindEvents();
     this.initAdminUI();
+    this.updateReelSweetZoneUI();
     this.updateHUD();
     this.updateControlsUI();
 
@@ -212,6 +225,7 @@ class PierlineGame {
       hint: document.getElementById('hint-banner'),
       reelPanel: document.getElementById('reel-panel'),
       reelStatusTag: document.getElementById('reel-status-tag'),
+      tensionSweetZone: document.getElementById('tension-sweet-zone'),
       tensionFill: document.getElementById('tension-fill'),
       tensionNeedle: document.getElementById('tension-needle'),
       progressFill: document.getElementById('progress-fill'),
@@ -225,6 +239,7 @@ class PierlineGame {
       catchOverlay: document.getElementById('catch-overlay'),
       catchRarity: document.getElementById('catch-rarity'),
       catchTitle: document.getElementById('catch-title'),
+      catchSwallowBanner: document.getElementById('catch-swallow-banner'),
       catchSprite: document.getElementById('catch-sprite'),
       catchWeight: document.getElementById('catch-weight'),
       catchValue: document.getElementById('catch-value'),
@@ -263,6 +278,7 @@ class PierlineGame {
       admForceBite: document.getElementById('adm-force-bite'),
       admNoSnap: document.getElementById('adm-nosnap'),
       admAutoLand: document.getElementById('adm-autoland'),
+      admForceAmbush: document.getElementById('adm-force-ambush'),
     };
   }
 
@@ -276,17 +292,51 @@ class PierlineGame {
 
   getStats() {
     const u = this.save.upgrades;
+    const rod = u.rod || 1;
+    const line = u.line || 1;
+    const lure = u.lure || 1;
+    const charm = u.charm || 1;
+    const reel = u.reel || 1;
+    const sinker = u.sinker || 1;
+    const chum = u.chum || 1;
+    const net = u.net || 1;
+
     return {
-      maxCastFrac: 0.56 + (u.rod - 1) * 0.10,
-      maxDepthFrac: 0.72 + (u.line - 1) * 0.08,
-      reelSpeed: 0.28 + (u.rod - 1) * 0.06,
-      tensionDecay: 0.46 + (u.line - 1) * 0.06,
-      lineStrength: 1 + (u.line - 1) * 0.28,
-      lureLuck: 1 + (u.lure - 1) * 0.38,
-      attractRadius: 34 + (u.lure - 1) * 10,
-      coinMult: 1 + ((u.charm || 1) - 1) * 0.25,
-      biteBonus: ((u.charm || 1) - 1) * 0.14,
+      maxCastFrac: 0.56 + (rod - 1) * 0.10,
+      maxDepthFrac: Math.min(1.0, 0.72 + (line - 1) * 0.08 + (sinker - 1) * 0.06),
+      reelSpeed: 0.28 + (rod - 1) * 0.06,
+      tensionDecay: 0.46 + (line - 1) * 0.06,
+      lineStrength: 1 + (line - 1) * 0.28,
+      lureLuck: 1 + (lure - 1) * 0.38,
+      attractRadius: 34 + (lure - 1) * 10,
+      coinMult: 1 + (charm - 1) * 0.25,
+      biteBonus: (charm - 1) * 0.14,
+      // Precision Reel stats
+      sweetMin: Math.max(0.20, 0.30 - (reel - 1) * 0.02),
+      sweetMax: Math.min(0.83, 0.75 + (reel - 1) * 0.0175),
+      sweetMult: 1.35 + (reel - 1) * 0.075,
+      retrieveBonus: (reel - 1) * 7,
+      // Deep Sinker stats
+      sinkRate: 3.6 + (sinker - 1) * 1.0,
+      chargeRate: 1.12 + (sinker - 1) * 0.08,
+      // Predator Bait (Chum) stats
+      ambushRadius: 76 + (chum - 1) * 12,
+      ambushRate: 1.45 + (chum - 1) * 0.45,
+      maxSwallows: chum >= 3 ? 3 : 2,
+      swallowBonusFrac: 0.40 + (chum - 1) * 0.15,
+      // Trophy Creel (Net) stats
+      weightExp: Math.max(0.36, 0.72 - (net - 1) * 0.09),
+      staminaDrain: 0.16 + (net - 1) * 0.03,
     };
+  }
+
+  updateReelSweetZoneUI() {
+    if (!this.el.tensionSweetZone) return;
+    const stats = this.getStats();
+    const leftPct = Math.round(stats.sweetMin * 100);
+    const widthPct = Math.round((stats.sweetMax - stats.sweetMin) * 100);
+    this.el.tensionSweetZone.style.left = `${leftPct}%`;
+    this.el.tensionSweetZone.style.width = `${widthPct}%`;
   }
 
   resize() {
@@ -600,6 +650,7 @@ class PierlineGame {
         this.setAdminStatus('HOOK A FISH FIRST');
       }
     });
+    bind(this.el.admForceAmbush, () => this.adminForceAmbush());
     this.refreshAdminLabels();
   }
 
@@ -632,10 +683,44 @@ class PierlineGame {
   }
 
   adminMaxGear() {
-    this.save.upgrades = { rod: 5, line: 5, lure: 5, charm: 5 };
+    const maxed = {};
+    for (const u of UPGRADES) maxed[u.id] = u.maxLevel || 5;
+    this.save.upgrades = maxed;
     this.persist();
+    this.updateReelSweetZoneUI();
     sound.playBuy();
-    this.setAdminStatus('ALL GEAR LV 5');
+    this.setAdminStatus(`ALL ${UPGRADES.length} GEAR LV 5`);
+  }
+
+  adminForceAmbush() {
+    if (this.state !== 'REELING' || !this.activeFish) {
+      this.setAdminStatus('HOOK A SMALL FISH FIRST');
+      return null;
+    }
+    const prey = this.activeFish;
+    // Prefer an existing eligible predator in the water, else spawn a bigger native species!
+    let pred = this.fishes.find((f) => f !== prey && this.canFishEat(f, prey));
+    if (!pred) {
+      const candidates = this.getMapSpecies().filter((sp) => canPredatorEat(sp, prey.species));
+      const chosen = candidates.length
+        ? candidates[Math.floor(Math.random() * candidates.length)]
+        : FISH_SPECIES.find((sp) => canPredatorEat(sp, prey.species));
+      if (!chosen) {
+        this.setAdminStatus('ALREADY APEX FISH!');
+        return null;
+      }
+      pred = this.spawnFish(false, chosen);
+      const offsetDir = prey.x < this.vw * 0.65 ? 1 : -1;
+      pred.x = clamp(prey.x + offsetDir * 44, this.pierEndX + 18, this.vw - 12);
+      pred.y = clamp(prey.y + rand(-10, 12), this.waterY + 10, this.getSeabedY(pred.x) - 8);
+      pred.homeY = pred.y;
+      pred.dir = prey.x >= pred.x ? 1 : -1;
+      this.fishes.push(pred);
+    }
+    this.ambushCooldown = 0;
+    this.startPredatorAmbush(pred);
+    this.closeModals();
+    return pred;
   }
 
   adminFillLog() {
@@ -857,6 +942,95 @@ class PierlineGame {
     this.updateControlsUI();
   }
 
+  canFishEat(predator, prey) {
+    if (!predator || !prey || predator === prey) return false;
+    if (!canPredatorEat(predator.species, prey.species)) return false;
+    const pSpr = this.sprites.fish[predator.species.id];
+    const qSpr = this.sprites.fish[prey.species.id];
+    const visuallyBigger = !pSpr || !qSpr || pSpr.w >= qSpr.w + 2 || predator.species.maxWeight >= prey.species.maxWeight * 3.0;
+    return visuallyBigger;
+  }
+
+  startPredatorAmbush(predator) {
+    if (!predator || !this.activeFish || predator === this.activeFish) return;
+    predator.ai = 'AMBUSH';
+    predator.ambushTimer = 3.6;
+    predator.dir = this.activeFish.x >= predator.x ? 1 : -1;
+    sound.playAmbushAlert();
+    this.spawnFloat(predator.x, Math.max(this.waterY + 10, predator.y - 10), 'AMBUSH!', '#fb7185');
+  }
+
+  triggerFishSwallow(predator, prey) {
+    if (!predator || !prey || predator === prey) return;
+    const preySp = prey.species;
+    const predSp = predator.species;
+
+    // Record eaten prey for bonus value & catch card callout!
+    this.eatenPrey.push({
+      id: preySp.id,
+      name: preySp.name,
+      value: Number.isFinite(preySp.value) ? preySp.value : 15,
+    });
+    this.swallowCount += 1;
+    this.ambushCooldown = 1.05;
+
+    // Juicy chomp VFX right at the swallow location!
+    const cx = prey.x;
+    const cy = prey.y;
+    for (let i = 0; i < 14; i++) {
+      this.particles.push({
+        x: cx + rand(-4, 4),
+        y: cy + rand(-3, 3),
+        vx: rand(-34, 34),
+        vy: rand(-32, 18),
+        g: 42,
+        life: rand(0.28, 0.55),
+        size: Math.random() > 0.45 ? 2 : 1,
+        color: i % 3 === 0 ? '#fb7185' : i % 3 === 1 ? '#fde047' : '#e0f7ff',
+      });
+    }
+    for (let i = 0; i < 6; i++) {
+      this.bubbles.push({
+        x: cx + rand(-5, 5),
+        y: cy + rand(-3, 3),
+        vy: rand(16, 28),
+        wobble: rand(0, Math.PI * 2),
+        hot: false,
+      });
+    }
+    this.spawnSplash(this.bobberX, this.waterY, 10);
+    this.spawnRipple(this.bobberX, this.waterY);
+    this.shakeTime = 0.24;
+    this.shakeMag = 2.6;
+    sound.playChomp();
+
+    // Remove the eaten smaller fish & replace ambient ecosystem from edge
+    this.fishes = this.fishes.filter((f) => f !== prey);
+    this.fishes.push(this.spawnFish(true));
+
+    // Seamlessly transfer the hook onto the bigger predator at its exact current position!
+    predator.ai = 'HOOKED';
+    predator.vx = 0;
+    predator.vy = 0;
+    this.activeFish = predator;
+    this.mouthDirSmooth = predator.dir;
+    const landX = this.pierEndX + 10;
+    const landY = this.waterY + 6;
+    const newDist = Math.hypot(predator.x - landX, predator.y - landY);
+    this.reelTotalDist = Math.max(28, newDist * 1.15);
+    // Keep tension safe & give player a fair calm window right after the swallow!
+    this.tension = Math.min(this.tension, 0.34);
+    this.fishFightState = 'CALM';
+    this.fishThrashing = false;
+    this.fishStamina = clamp(predSp.stamina || 1.0, 0.7, 2.0);
+    this.fishFightTimer = rand(0.95, 1.35);
+
+    this.swallowBannerTimer = 2.4;
+    this.swallowBannerText = `${predSp.name.toUpperCase()} ATE ${preySp.name.toUpperCase()}! REEL IT IN!`;
+    this.spawnFloat(cx, Math.max(this.waterY - 8, cy - 12), `CHOMP! ${predSp.name.toUpperCase()}!`, '#fde047');
+    this.updateControlsUI();
+  }
+
   hookFish() {
     if (!this.activeFish) return;
     const fish = this.activeFish;
@@ -873,6 +1047,11 @@ class PierlineGame {
     this.reelHold = true;
     this.retrieving = false;
     this.devAutoLand = false;
+    this.eatenPrey = [];
+    this.swallowCount = 0;
+    this.ambushCooldown = 0.45;
+    this.swallowBannerTimer = 0;
+    this.swallowBannerText = '';
     this.mouthDirSmooth = fish.dir;
     this.fishThrashing = false;
     this.fishFightState = 'CALM';
@@ -881,6 +1060,7 @@ class PierlineGame {
     this.fishFightTimer = rand(0.85, 1.35);
     this.shakeTime = 0.14;
     this.shakeMag = 1.6;
+    this.updateReelSweetZoneUI();
     sound.playHookSet();
     this.spawnSplash(this.bobberX, this.waterY, 8);
     this.spawnRipple(this.bobberX, this.waterY);
@@ -897,11 +1077,22 @@ class PierlineGame {
       this.activeFish.vy = 0;
       this.activeFish = null;
     }
+    for (const f of this.fishes) {
+      if (f.ai === 'AMBUSH') {
+        f.ai = 'CRUISE';
+        f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8);
+      }
+    }
     this.state = 'IDLE';
     this.reelHold = false;
     this.chargeHold = false;
     this.retrieving = false;
     this.devAutoLand = false;
+    this.eatenPrey = [];
+    this.swallowCount = 0;
+    this.ambushCooldown = 0;
+    this.swallowBannerTimer = 0;
+    this.swallowBannerText = '';
     this.tension = 0;
     this.progress = 0;
     this.fishThrashing = false;
@@ -921,6 +1112,12 @@ class PierlineGame {
     this.landingStartX = this.activeFish.x;
     this.landingStartY = this.activeFish.y;
     this.landingStartDir = this.activeFish.dir;
+    for (const f of this.fishes) {
+      if (f.ai === 'AMBUSH') {
+        f.ai = 'CRUISE';
+        f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8);
+      }
+    }
     this.spawnSplash(this.activeFish.x, this.waterY, 12);
     this.spawnRipple(this.activeFish.x, this.waterY);
     sound.playSplash(true);
@@ -928,14 +1125,23 @@ class PierlineGame {
   }
 
   completeCatch() {
+    const stats = this.getStats();
     const sp = this.activeFish.species;
+    const eaten = this.eatenPrey.slice();
     const minW = Number.isFinite(sp.minWeight) ? sp.minWeight : 0.2;
     const maxW = Number.isFinite(sp.maxWeight) ? sp.maxWeight : Math.max(minW + 0.5, 1.0);
-    const weight = Number(lerp(minW, maxW, Math.pow(Math.random(), 0.72)).toFixed(2));
+    // Trophy Creel biases weight higher, and eating smaller fish makes the predator even heavier!
+    const rawWeight = lerp(minW, maxW, Math.pow(Math.random(), stats.weightExp));
+    const bellyMult = 1 + eaten.length * 0.06;
+    const weight = Number(Math.min(maxW * 1.15, rawWeight * bellyMult).toFixed(2));
     const sizeRatio = clamp((weight - minW) / Math.max(0.01, maxW - minW), 0, 1);
     const sizeBonus = 0.85 + sizeRatio * 0.45;
     const baseVal = Number.isFinite(sp.value) ? sp.value : 15;
-    const value = Math.max(5, Math.round(baseVal * sizeBonus * this.getStats().coinMult));
+    const swallowBonus = eaten.reduce(
+      (sum, p) => sum + Math.max(4, Math.round(p.value * stats.swallowBonusFrac * stats.coinMult)),
+      0
+    );
+    const value = Math.max(5, Math.round(baseVal * sizeBonus * stats.coinMult)) + swallowBonus;
 
     const prev = this.save.log[sp.id];
     const isNew = !prev;
@@ -953,8 +1159,11 @@ class PierlineGame {
     this.fishes = this.fishes.filter((f) => f !== this.activeFish);
     this.activeFish = null;
     this.fishes.push(this.spawnFish(true));
+    this.eatenPrey = [];
+    this.swallowCount = 0;
+    this.swallowBannerTimer = 0;
 
-    this.lastCatchInfo = { species: sp, weight, value, isNew, isRecord };
+    this.lastCatchInfo = { species: sp, weight, value, isNew, isRecord, eaten, swallowBonus };
     this.catchTime = 0;
     this.state = 'CAUGHT';
     this.activeModal = 'catch';
@@ -965,6 +1174,15 @@ class PierlineGame {
     this.el.catchRarity.style.background = rMeta.bg;
     this.el.catchRarity.style.color = rMeta.color;
     this.el.catchTitle.textContent = sp.name.toUpperCase();
+    if (this.el.catchSwallowBanner) {
+      if (eaten.length > 0) {
+        const preyChain = eaten.map((p) => p.name.toUpperCase()).join(' \u2192 ');
+        this.el.catchSwallowBanner.textContent = `SWALLOWED ${preyChain} (+${swallowBonus} G BONUS!)`;
+        this.el.catchSwallowBanner.classList.remove('hidden');
+      } else {
+        this.el.catchSwallowBanner.classList.add('hidden');
+      }
+    }
     this.el.catchSprite.src = this.spriteUrls[sp.id];
     this.el.catchWeight.textContent = `${weight.toFixed(2)} kg`;
     this.el.catchValue.textContent = `+${value} G`;
@@ -1069,7 +1287,7 @@ class PierlineGame {
       row.className = 'shop-item';
       row.innerHTML = `
         <div class="shop-info">
-          <div class="shop-title">${u.name} <span class="lv-tag">LV ${lv}/${u.maxLevel}</span></div>
+          <div class="shop-title"><span class="shop-swatch" style="background:${u.color || '#38bdf8'}"></span>${u.name} <span class="lv-tag">LV ${lv}/${u.maxLevel}</span></div>
           <div class="shop-desc">${u.desc}</div>
           <div class="shop-perk">GEAR: ${u.tiers[lv - 1]}${maxed ? ' (MAX)' : ' \u2192 ' + u.tiers[lv]}</div>
         </div>
@@ -1083,6 +1301,7 @@ class PierlineGame {
           this.save.coins -= cost;
           this.save.upgrades[u.id] = lv + 1;
           this.persist();
+          this.updateReelSweetZoneUI();
           sound.playBuy();
           this.updateHUD();
           this.renderShop();
@@ -1151,6 +1370,8 @@ class PierlineGame {
       btn.classList.add('is-bite');
       hint.textContent = 'BITE! TAP FAST!';
     } else if (this.state === 'REELING') {
+      const stats = this.getStats();
+      const multStr = stats.sweetMult.toFixed(2).replace(/0$/, '');
       if (this.fishFightState === 'THRASH') {
         btn.textContent = 'EASE OFF! (FIGHTING)';
         btn.classList.add('is-warn');
@@ -1160,13 +1381,16 @@ class PierlineGame {
         btn.classList.add('is-brace');
         hint.textContent = 'FISH FLARING — GET READY TO EASE OFF!';
       } else if (this.inSweetSpot) {
-        btn.textContent = 'SWEET SPOT! REELING x1.35';
+        btn.textContent = `SWEET SPOT! REELING x${multStr}`;
         btn.classList.add('is-sweet');
         hint.textContent = 'KEEP LINE IN THE GREEN ZONE FOR FAST PULL!';
       } else {
         btn.textContent = 'HOLD TO REEL IN!';
         btn.classList.add('is-reel');
         hint.textContent = 'HOLD TO BUILD GREEN SWEET-SPOT PULL';
+      }
+      if (this.swallowBannerTimer > 0 && this.swallowBannerText) {
+        hint.textContent = this.swallowBannerText;
       }
     } else if (this.state === 'LANDING') {
       btn.textContent = 'LANDING!';
@@ -1383,8 +1607,15 @@ class PierlineGame {
     }
 
     // Fishing state machine
+    const statsNow = this.getStats();
+    if (this.ambushCooldown > 0) this.ambushCooldown = Math.max(0, this.ambushCooldown - dt);
+    if (this.swallowBannerTimer > 0) {
+      this.swallowBannerTimer = Math.max(0, this.swallowBannerTimer - dt);
+      if (this.swallowBannerTimer === 0 && this.state === 'REELING') this.updateControlsUI();
+    }
+
     if (this.state === 'CHARGING') {
-      this.chargePower += this.chargeDir * dt * 1.12;
+      this.chargePower += this.chargeDir * dt * statsNow.chargeRate;
       if (this.chargePower >= 1) { this.chargePower = 1; this.chargeDir = -1; }
       if (this.chargePower <= 0.08) { this.chargePower = 0.08; this.chargeDir = 1; }
       this.rodFlex = lerp(this.rodFlex, 0.14 * this.chargePower, 1 - Math.exp(-8 * dt));
@@ -1412,7 +1643,7 @@ class PierlineGame {
       this.bobDipImpulse *= Math.exp(-9 * dt);
       if (this.retrieving) {
         // Player manually cranks the lure upward & back toward the pier (ZERO instant teleport!)
-        const retrieveSpd = 42 + (this.save.upgrades.rod - 1) * 8;
+        const retrieveSpd = 42 + (this.save.upgrades.rod - 1) * 8 + statsNow.retrieveBonus;
         const pierEdgeX = this.pierEndX + 10;
         const dxPier = pierEdgeX - this.bobberX;
         const stepX = Math.sign(dxPier) * Math.min(Math.abs(dxPier), retrieveSpd * 0.92 * dt);
@@ -1445,7 +1676,7 @@ class PierlineGame {
       } else {
         this.bobberY = this.waterY + Math.sin(this.time * 4.2) * 1.1 + this.bobDipImpulse;
         this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, 1 - Math.exp(-4 * dt));
-        this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-3.6 * dt));
+        this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-statsNow.sinkRate * dt));
         this.rodFlex = lerp(this.rodFlex, 0.04, 1 - Math.exp(-6 * dt));
       }
     } else if (this.state === 'BITE') {
@@ -1557,15 +1788,15 @@ class PierlineGame {
       } else {
         this.fishFightState = 'CALM';
         this.fishThrashing = false;
-        this.fishStamina = Math.max(0.45, this.fishStamina - 0.16);
+        this.fishStamina = Math.max(0.42, this.fishStamina - stats.staminaDrain);
         this.fishFightTimer = rand(0.95, 1.55 - Math.min(0.4, strength * 0.12));
         this.updateControlsUI();
       }
     }
 
-    // Sweet-spot zone (30% - 75% tension while pulling a non-thrashing fish) gives 1.35x reel power!
+    // Sweet-spot zone (widened by Precision Reel!) gives upgraded sweetMult reel power!
     const wasSweet = this.inSweetSpot;
-    this.inSweetSpot = pulling && !this.fishThrashing && this.tension >= 0.30 && this.tension <= 0.75;
+    this.inSweetSpot = pulling && !this.fishThrashing && this.tension >= stats.sweetMin && this.tension <= stats.sweetMax;
     if (wasSweet !== this.inSweetSpot) this.updateControlsUI();
 
     const landX = this.pierEndX + 10;
@@ -1580,7 +1811,7 @@ class PierlineGame {
     let ay = 0;
 
     if (pulling) {
-      const sweetBoost = this.inSweetSpot ? 1.35 : 1.0;
+      const sweetBoost = this.inSweetSpot ? stats.sweetMult : 1.0;
       const pullBase = ((165 + (this.save.upgrades.rod - 1) * 32) * sweetBoost) / (0.64 + strength * 0.26);
       const pullScale = this.devAutoLand ? 2.4 : (this.fishThrashing ? 0.30 : 1.0);
       ax += nx * pullBase * pullScale;
@@ -1696,7 +1927,8 @@ class PierlineGame {
         tag.textContent = 'BRACE! FISH FLARING!';
         tag.classList.add('status-warn');
       } else if (this.inSweetSpot) {
-        tag.textContent = 'SWEET SPOT! x1.35 PULL';
+        const multStr = stats.sweetMult.toFixed(2).replace(/0$/, '');
+        tag.textContent = `SWEET SPOT! x${multStr} PULL`;
         tag.classList.add('status-sweet');
       } else {
         tag.textContent = 'CALM — HOLD TO REEL!';
@@ -1717,11 +1949,57 @@ class PierlineGame {
   updateFishAI(dt) {
     const stats = this.getStats();
     let engagedCount = this.fishes.filter((f) => f.ai === 'CURIOUS' || f.ai === 'NIBBLE' || f.ai === 'APPROACH').length;
+    let ambusherCount = this.fishes.filter((f) => f.ai === 'AMBUSH').length;
 
-    for (const f of this.fishes) {
+    // Iterate over a shallow copy because a predator swallow removes the eaten smaller fish from this.fishes!
+    const snapshot = this.fishes.slice();
+    for (const f of snapshot) {
+      if (!this.fishes.includes(f)) continue;
       if (f.ai === 'HOOKED' || f.ai === 'BITE') continue;
 
-      if (f.ai === 'FLEE') {
+      if (f.ai === 'AMBUSH') {
+        const prey = this.activeFish;
+        if (this.state !== 'REELING' || !prey || prey === f || !this.canFishEat(f, prey)) {
+          f.ai = 'CRUISE';
+          f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8);
+          continue;
+        }
+        f.ambushTimer = (f.ambushTimer ?? 3.2) - dt;
+        const predMouth = this.getFishMouthPos(f);
+        const dx = prey.x - predMouth.x;
+        const dy = prey.y - predMouth.y;
+        const dist = Math.hypot(dx, dy);
+        if (Math.abs(prey.x - f.x) > 2) f.dir = prey.x >= f.x ? 1 : -1;
+
+        const chaseSpd = Math.max(54, f.speed * 2.45);
+        if (dist > 1) {
+          f.x += (dx / dist) * chaseSpd * dt;
+          f.y += (dy / dist) * chaseSpd * dt;
+        }
+        if (Math.random() < dt * 10) {
+          this.bubbles.push({
+            x: f.x - f.dir * 6 + rand(-2, 2),
+            y: f.y + rand(-2, 2),
+            vy: rand(14, 24),
+            wobble: rand(0, Math.PI * 2),
+            hot: false,
+          });
+        }
+
+        const preySpr = this.sprites.fish[prey.species.id];
+        const eatDist = Math.max(8, preySpr ? preySpr.w * 0.45 : 8);
+        if (dist <= eatDist) {
+          this.triggerFishSwallow(f, prey);
+          ambusherCount = 0;
+          continue;
+        }
+        if (f.ambushTimer <= 0 || dist > stats.ambushRadius * 1.9) {
+          f.ai = 'CRUISE';
+          f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8);
+          ambusherCount = Math.max(0, ambusherCount - 1);
+          continue;
+        }
+      } else if (f.ai === 'FLEE') {
         f.fleeTimer -= dt;
         f.x += f.dir * f.speed * 2.3 * dt;
         if (f.fleeTimer <= 0) f.ai = 'CRUISE';
@@ -1830,6 +2108,21 @@ class PierlineGame {
             f.inspectSide = f.x <= this.hookX ? -1 : 1;
             f.inspectTimer = rand(0.35, 0.65);
             engagedCount = 1;
+          }
+        } else if (
+          this.state === 'REELING' &&
+          this.activeFish &&
+          ambusherCount === 0 &&
+          this.ambushCooldown <= 0 &&
+          this.swallowCount < stats.maxSwallows &&
+          this.canFishEat(f, this.activeFish)
+        ) {
+          const prey = this.activeFish;
+          const distToLand = Math.hypot(prey.x - (this.pierEndX + 10), prey.y - (this.waterY + 6));
+          const distToPrey = Math.hypot(prey.x - f.x, prey.y - f.y);
+          if (distToLand > 18 && distToPrey < stats.ambushRadius && Math.random() < dt * stats.ambushRate) {
+            this.startPredatorAmbush(f);
+            ambusherCount = 1;
           }
         }
       }

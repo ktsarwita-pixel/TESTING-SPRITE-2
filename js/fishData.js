@@ -458,6 +458,7 @@ export const UPGRADES = [
     id: 'rod',
     name: 'Fishing Rod',
     icon: 'rod',
+    color: '#38bdf8',
     desc: 'Stronger reel pull & longer cast reach.',
     maxLevel: 5,
     tiers: ['Bamboo Pole', 'Fiberglass Rod', 'Carbon Rod', 'Tidebreaker', 'Mythic Rod'],
@@ -467,6 +468,7 @@ export const UPGRADES = [
     id: 'line',
     name: 'Fishing Line',
     icon: 'line',
+    color: '#60a5fa',
     desc: 'Reaches deeper fish & resists snapping.',
     maxLevel: 5,
     tiers: ['Cotton Twine', 'Nylon Line', 'Braided Line', 'Fluorocarbon', 'Starlight Line'],
@@ -476,6 +478,7 @@ export const UPGRADES = [
     id: 'lure',
     name: 'Lure & Bait',
     icon: 'lure',
+    color: '#c084fc',
     desc: 'Faster bites & attracts rarer species.',
     maxLevel: 5,
     tiers: ['Bread Crumb', 'Earthworm', 'Silver Spinner', 'Glow Jig', 'Golden Feather'],
@@ -485,12 +488,59 @@ export const UPGRADES = [
     id: 'charm',
     name: 'Angler Charm',
     icon: 'charm',
+    color: '#facc15',
     desc: '+25% coin value per level & forgiving hooks.',
     maxLevel: 5,
     tiers: ['Tin Bucket', 'Brass Bell', 'Pearl Charm', 'Sea Compass', 'Tide Crown'],
     costs: [0, 60, 170, 390, 820],
   },
+  {
+    id: 'reel',
+    name: 'Precision Reel',
+    icon: 'reel',
+    color: '#2dd4bf',
+    desc: 'Wider green sweet spot, faster boost & quicker retrieve.',
+    maxLevel: 5,
+    tiers: ['Rusty Crank', 'Bronze Spool', 'Ball-Bearing', 'Turbo Drag', 'Astral Chrono'],
+    costs: [0, 55, 155, 360, 760],
+  },
+  {
+    id: 'sinker',
+    name: 'Deep Sinker',
+    icon: 'sinker',
+    color: '#94a3b8',
+    desc: 'Drops hook much faster straight to the seabed floor.',
+    maxLevel: 5,
+    tiers: ['Pebble Weight', 'Lead Split-Shot', 'Brass Pyramid', 'Tungsten Drop', 'Abyssal Core'],
+    costs: [0, 45, 130, 300, 650],
+  },
+  {
+    id: 'chum',
+    name: 'Predator Bait',
+    icon: 'chum',
+    color: '#fb7185',
+    desc: 'Lures bigger predators to eat hooked fish (+bonus gold).',
+    maxLevel: 5,
+    tiers: ['Fish Flakes', 'Sardine Oil', 'Bloodworm Chum', 'Apex Scent', 'Kraken Call'],
+    costs: [0, 65, 180, 410, 860],
+  },
+  {
+    id: 'net',
+    name: 'Trophy Creel',
+    icon: 'net',
+    color: '#34d399',
+    desc: 'Heavier record-breaking fish & tires big fighters faster.',
+    maxLevel: 5,
+    tiers: ['Woven Basket', 'Cedar Keepnet', 'Weighmaster Net', 'Gilded Creel', 'Sovereign Vault'],
+    costs: [0, 70, 195, 440, 920],
+  },
 ];
+
+export function canPredatorEat(predatorSpecies, preySpecies) {
+  if (!predatorSpecies || !preySpecies) return false;
+  if (predatorSpecies.id === preySpecies.id) return false;
+  return predatorSpecies.maxWeight >= preySpecies.maxWeight * 2.15;
+}
 
 export function getSpeciesById(id) {
   return FISH_SPECIES.find((f) => f.id === id) || FISH_SPECIES[0];

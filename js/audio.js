@@ -103,6 +103,19 @@ class SoundEngine {
     this.tone(340, 740, 0.11, 'square', 0.08);
   }
 
+  playAmbushAlert() {
+    this.tone(190, 340, 0.09, 'sawtooth', 0.065, 0);
+    this.tone(420, 560, 0.09, 'square', 0.06, 0.07);
+  }
+
+  playChomp() {
+    // Deep crunchy chomp + splash + dramatic ambush chord
+    this.noise(0.18, 0.13, 620, 0);
+    this.tone(180, 68, 0.16, 'sawtooth', 0.11, 0);
+    this.tone(330, 520, 0.10, 'square', 0.085, 0.07);
+    this.tone(660, 880, 0.16, 'square', 0.09, 0.14);
+  }
+
   playReelTick(tension) {
     const now = performance.now();
     if (now - this.lastReelTick < 75) return;

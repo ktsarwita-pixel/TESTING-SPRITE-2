@@ -55,7 +55,7 @@
         <div class="meter-row">
           <span class="meter-label">LINE</span>
           <div class="meter-track tension-track">
-            <div class="meter-sweet-zone" title="Sweet Spot (1.35x Reel Boost)"></div>
+            <div id="tension-sweet-zone" class="meter-sweet-zone" title="Sweet Spot Reel Boost"></div>
             <div class="meter-danger-zone" title="Snap Risk"></div>
             <div id="tension-fill" class="meter-fill tension"></div>
             <div id="tension-needle" class="meter-needle"></div>
@@ -79,6 +79,7 @@
       <div class="pixel-panel catch-card">
         <div id="catch-rarity" class="rarity-tag">COMMON</div>
         <h2 id="catch-title">SILVER MINNOW</h2>
+        <div id="catch-swallow-banner" class="catch-swallow-banner hidden"></div>
         <div class="catch-sprite-frame">
           <img id="catch-sprite" alt="Caught fish pixel sprite" />
         </div>
@@ -130,7 +131,7 @@
       <div class="pixel-panel modal-panel">
         <div class="modal-header">
           <h2 id="log-title">FISH LOG</h2>
-          <span id="log-count" class="modal-sub">0 / 20</span>
+          <span id="log-count" class="modal-sub">0 / 26</span>
           <button id="btn-log-close" class="pixel-btn close-btn" type="button" aria-label="Close Fish Log">X</button>
         </div>
         <div id="log-grid" class="modal-body log-grid"></div>
@@ -188,6 +189,7 @@
             <div class="admin-row">
               <button id="adm-nosnap" class="pixel-btn" type="button">NO SNAP: OFF</button>
               <button id="adm-autoland" class="pixel-btn accent-cyan" type="button">AUTO-LAND ACTIVE</button>
+              <button id="adm-force-ambush" class="pixel-btn accent-gold" type="button">PREDATOR EAT</button>
             </div>
           </div>
         </div>

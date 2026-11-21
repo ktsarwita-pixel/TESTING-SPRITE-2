@@ -719,6 +719,7 @@ function renderFishes(g, ctx, pal) {
     const sprSet = g.sprites.fish[f.species.id];
     const animSpeed =
       f.ai === 'HOOKED' && g.fishThrashing ? 18 :
+      f.ai === 'AMBUSH' ? 16 :
       f.ai === 'FLEE' ? 14 :
       f.ai === 'APPROACH' ? 10 :
       6.4;
@@ -730,7 +731,7 @@ function renderFishes(g, ctx, pal) {
 
     const depthRatio = clamp((f.y - g.waterY) / Math.max(1, g.vh - g.waterY), 0, 1);
     ctx.save();
-    if (f.ai !== 'HOOKED' && g.state !== 'LANDING') {
+    if (f.ai !== 'HOOKED' && f.ai !== 'AMBUSH' && g.state !== 'LANDING') {
       ctx.globalAlpha = clamp(0.97 - depthRatio * 0.20 - pal.night * 0.10, 0.62, 0.98);
     }
 
@@ -739,19 +740,28 @@ function renderFishes(g, ctx, pal) {
     // Subtle organic 1px bioluminescent / mythic starlight sparks trailing special species (no rectangular box!)
     if (f.species.id === 'leviathan' || f.species.id === 'magmaeel' || f.species.id === 'krakentitan' || f.species.id === 'celestialcarp') {
       const isMyth = f.species.id === 'krakentitan';
-      const count = isMyth ? 4 : 2;
+      const count = isMyth ? 6 : 2;
       ctx.save();
       for (let s = 0; s < count; s++) {
-        const t = g.time * 4.5 + f.phase + s * 2.1;
-        const alpha = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(t * 2));
+        const t = g.time * 4.2 + f.phase + s * 1.55;
+        const alpha = 0.42 + 0.52 * (0.5 + 0.5 * Math.sin(t * 2.1));
         ctx.globalAlpha = alpha;
         ctx.fillStyle = isMyth
           ? (s % 3 === 0 ? '#f9a8d4' : s % 3 === 1 ? '#fde047' : '#5eead4')
           : f.species.id === 'celestialcarp' ? '#fde047'
           : f.species.id === 'leviathan' ? '#7dd3fc' : '#fde047';
-        const sx = Math.round(f.x - f.dir * (8 + s * 5) + Math.sin(t) * 2.5);
-        const sy = Math.round(f.y + Math.cos(t * 1.4 + s) * (isMyth ? 6 : 3));
+        const sx = Math.round(f.x - f.dir * (4 + s * 4.5) + Math.sin(t) * (isMyth ? 4.0 : 2.5));
+        const sy = Math.round(f.y + Math.cos(t * 1.35 + s) * (isMyth ? 9.5 : 3));
         ctx.fillRect(sx, sy, 1, 1);
+      }
+      // Subtle twinkling starlight cross above the Abyssal Kraken's golden crown
+      if (isMyth && Math.sin(g.time * 6.5 + f.phase) > 0.25) {
+        const cx = Math.round(f.x + f.dir * 5);
+        const cy = dy + 1;
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#fef9c3';
+        ctx.fillRect(cx, cy - 1, 1, 3);
+        ctx.fillRect(cx - 1, cy, 3, 1);
       }
       ctx.restore();
     }
@@ -764,7 +774,18 @@ function renderFishes(g, ctx, pal) {
       ctx.fillRect(lx, dy + 1, 4, 4);
     }
 
-    if (f.ai === 'HOOKED' && g.state === 'REELING') {
+    if (f.ai === 'AMBUSH' && g.state === 'REELING') {
+      // Dramatic flashing predator lock-on '!' warning above the lunging bigger fish!
+      const pulse = Math.floor(g.time * 18) % 2 === 0;
+      const ax = Math.round(f.x + f.dir * (sprSet.w * 0.22));
+      const ay = Math.max(g.waterY + 3, dy - 7);
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = '#111622';
+      ctx.fillRect(ax - 2, ay - 1, 5, 8);
+      ctx.fillStyle = pulse ? '#fb7185' : '#fde047';
+      ctx.fillRect(ax - 1, ay, 3, 4);
+      ctx.fillRect(ax - 1, ay + 5, 3, 1);
+    } else if (f.ai === 'HOOKED' && g.state === 'REELING') {
       const rx = Math.round(f.x);
       const ry = Math.round(f.y);
       if (g.fishFightState === 'WARNING') {
