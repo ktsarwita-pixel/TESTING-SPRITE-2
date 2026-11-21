@@ -1,3 +1,5 @@
+import { EXTRA_FISH_SPRITES } from './fishSpritesExtra.js';
+
 // 12 handcrafted 16-bit fish species, each with 4 smooth swim animation frames (facing RIGHT).
 // Frame cycle: 0 = neutral, 1 = tail-up & fin-sweep, 2 = neutral-glide, 3 = tail-down & fin-sweep.
 
@@ -8,7 +10,7 @@ function normalizeFrames(frames) {
   });
 }
 
-export const FISH_SPRITES = {
+const BASE_FISH_SPRITES = {
   // 1. Silver Minnow (15x9) — sleek shimmering coastal baitfish
   minnow: normalizeFrames([
     [
@@ -757,3 +759,5 @@ export const FISH_SPRITES = {
     ],
   ]),
 };
+
+export const FISH_SPRITES = { ...BASE_FISH_SPRITES, ...EXTRA_FISH_SPRITES };

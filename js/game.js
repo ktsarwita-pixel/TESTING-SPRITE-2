@@ -1,519 +1,838 @@
-import { FISH_SPECIES, RARITY_META, UPGRADES } from './fishData.js';
+// PIERLINE — 2D Pixel-Art Side-POV Fishing Game (Mobile + Desktop, Multi-Map)
+import { FISH_SPECIES, RARITY_META, UPGRADES, getUpgradeCost } from './fishData.js';
+import { MAPS, getMapById } from './maps.js';
 import { buildSpriteCache, spriteToDataURL } from './sprites.js';
-import { sound } from './audio.js';
 import { renderGameWorld } from './renderer.js';
+import { sound } from './audio.js';
 
-const SAVE_KEY = 'pierline_save_v1';
-
+const SAVE_KEY = 'pierline_pixel_fishing_v1';
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 
+function defaultSave() {
+  return {
+    coins: 0,
+    totalCaught: 0,
+    upgrades: { rod: 1, line: 1, lure: 1, charm: 1 },
+    log: {},
+    currentMap: 'harbor',
+    unlockedMaps: ['harbor'],
+    sound: true,
+  };
+}
+
+function loadSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return defaultSave();
+    const parsed = JSON.parse(raw);
+    const unlocked = Array.isArray(parsed.unlockedMaps) && parsed.unlockedMaps.length
+      ? Array.from(new Set(['harbor', ...parsed.unlockedMaps]))
+      : ['harbor'];
+    const currentMap = unlocked.includes(parsed.currentMap) ? parsed.currentMap : 'harbor';
+    return {
+      ...defaultSave(),
+      ...parsed,
+      currentMap,
+      unlockedMaps: unlocked,
+      upgrades: { ...defaultSave().upgrades, ...(parsed.upgrades || {}) },
+      log: parsed.log || {},
+    };
+  } catch {
+    return defaultSave();
+  }
+}
+
 class PierlineGame {
   constructor() {
     this.canvas = document.getElementById('game-canvas');
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
     this.sprites = buildSpriteCache();
+    this.spriteUrls = {};
+    for (const sp of FISH_SPECIES) {
+      this.spriteUrls[sp.id] = spriteToDataURL(this.sprites.fish[sp.id].right[0], 4);
+    }
 
-    // Virtual pixel dimensions
+    this.save = loadSave();
+    sound.setMuted(this.save.sound === false);
+
+    // Virtual pixel resolution (recomputed on resize/orientation change)
     this.vw = 320;
-    this.vh = 200;
+    this.vh = 180;
     this.isPortrait = false;
-    this.waterY = 80;
-    this.pierEndX = 72;
-    this.pierY = 68;
-    this.anglerX = 52;
-    this.anglerY = 47;
+    this.waterY = 66;
+    this.pierY = 50;
+    this.pierEndX = 76;
+    this.anglerX = 48;
+    this.anglerY = 26;
 
-    // Persistent progress
-    this.save = this.loadSave();
-    sound.setMuted(this.save.muted);
-
-    // Environment & FX
+    // Gameplay state machine: IDLE | CHARGING | CASTING | WAITING | BITE | REELING | LANDING | CAUGHT
+    this.state = 'IDLE';
     this.time = 0;
     this.timeOfDay = 0.27;
-    this.stars = [];
+    this.lastFrame = performance.now();
+
+    // Casting / bobber / hook
+    this.chargePower = 0;
+    this.chargeDir = 1;
+    this.castStartX = 0;
+    this.castStartY = 0;
+    this.castTargetX = 160;
+    this.castT = 0;
+    this.bobberX = 160;
+    this.bobberY = 66;
+    this.hookX = 160;
+    this.hookY = 92;
+    this.targetDepthY = 92;
+    this.rodFlex = 0;
+    this.castFollowThrough = 0;
+
+    // Bite & reeling state
+    this.activeFish = null;
+    this.biteTimer = 0;
+    this.tension = 0;
+    this.progress = 0;
+    this.fishThrashing = false;
+    this.fishFightTimer = 0;
+    this.reelHold = false;
+    this.chargeHold = false;
+    this.reelTickAccum = 0;
+    this.landingT = 0;
+    this.landingStartX = 0;
+    this.landingStartY = 0;
+    this.lastCatchInfo = null;
+
+    // Ambient world entities
+    this.fishes = [];
     this.clouds = [];
     this.birds = [];
+    this.stars = [];
     this.kelp = [];
-    this.corals = [];
     this.pebbles = [];
+    this.corals = [];
     this.fireflies = [];
+    this.weatherParticles = [];
     this.bubbles = [];
-    this.jigAnimTimer = 0;
-    this.particles = [];
     this.ripples = [];
+    this.particles = [];
     this.floats = [];
     this.shakeTime = 0;
     this.shakeMag = 0;
 
-    // State machine: IDLE | CHARGING | CASTING | WAITING | BITE | REELING | LANDING | CAUGHT
-    this.state = 'IDLE';
-    this.stateTimer = 0;
-    this.pointerHeld = false;
-    this.holdDuration = 0;
-    this.activePointerId = null;
-
-    // Cast & line state
-    this.chargePower = 0.2;
-    this.chargeDir = 1;
-    this.castStartX = 0;
-    this.castStartY = 0;
-    this.castTargetX = 0;
-    this.castFlightT = 0;
-    this.castFlightDur = 0.45;
-    this.bobberX = 0;
-    this.bobberY = 0;
-    this.bobberDip = 0;
-    this.hookX = 0;
-    this.hookY = 0;
-    this.hookDepth = 0;
-    this.targetHookDepth = 0;
-    this.jigBoost = 0;
-    this.rodBend = 0;
-
-    // Fish & reeling state
-    this.fishes = [];
-    this.hookedFish = null;
-    this.biteTimer = 0;
-    this.reelProgress = 0.35;
-    this.tension = 0.15;
-    this.snapGrace = 0;
-    this.fishThrashing = false;
-    this.thrashTimer = 1.2;
-    this.landStartX = 0;
-    this.landStartY = 0;
-    this.landT = 0;
-    this.lastCatchInfo = null;
-
-    // UI references
-    this.ui = {
-      coins: document.getElementById('hud-coins'),
-      catches: document.getElementById('hud-catches'),
-      depthBadge: document.getElementById('hud-depth'),
-      actionBtn: document.getElementById('action-btn'),
-      actionLabel: document.getElementById('action-label'),
-      actionSub: document.getElementById('action-sub'),
-      reelHud: document.getElementById('reel-hud'),
-      reelStatus: document.getElementById('reel-status'),
-      tensionFill: document.getElementById('tension-fill'),
-      progressFill: document.getElementById('progress-fill'),
-      progressIcon: document.getElementById('progress-icon'),
-      btnShop: document.getElementById('btn-shop'),
-      btnLog: document.getElementById('btn-log'),
-      btnMute: document.getElementById('btn-mute'),
-      shopModal: document.getElementById('shop-modal'),
-      shopList: document.getElementById('shop-list'),
-      shopCoins: document.getElementById('shop-coins'),
-      logModal: document.getElementById('log-modal'),
-      logGrid: document.getElementById('log-grid'),
-      logSummary: document.getElementById('log-summary'),
-      catchOverlay: document.getElementById('catch-overlay'),
-      catchImg: document.getElementById('catch-img'),
-      catchName: document.getElementById('catch-name'),
-      catchRarity: document.getElementById('catch-rarity'),
-      catchStamp: document.getElementById('catch-stamp'),
-      catchWeight: document.getElementById('catch-weight'),
-      catchValue: document.getElementById('catch-value'),
-      catchDesc: document.getElementById('catch-desc'),
-      catchContinue: document.getElementById('catch-continue'),
-      hintBanner: document.getElementById('hint-banner'),
-    };
-
+    this.activeModal = null;
+    this.initDOM();
     this.resize();
-    this.initEnvironment();
-    this.spawnInitialFishes();
+    this.initWorldScenery();
+    this.populateFish();
     this.bindEvents();
     this.updateHUD();
-    this.updateActionUI();
+    this.updateControlsUI();
 
-    this.lastTs = performance.now();
-    requestAnimationFrame((ts) => this.loop(ts));
+    window.__PIERLINE__ = this;
+    requestAnimationFrame((t) => this.loop(t));
   }
 
-  defaultSave() {
-    return {
-      coins: 0,
-      totalCatches: 0,
-      upgrades: { rod: 1, line: 1, lure: 1, charm: 1 },
-      log: {},
-      muted: false,
+  getCurrentMap() {
+    return getMapById(this.save.currentMap);
+  }
+
+  getMapSpecies(mapId = this.save.currentMap) {
+    return FISH_SPECIES.filter((sp) => !sp.maps || sp.maps.includes(mapId));
+  }
+
+  initDOM() {
+    this.el = {
+      coins: document.getElementById('hud-coins'),
+      caught: document.getElementById('hud-caught'),
+      time: document.getElementById('hud-time'),
+      depthBadge: document.getElementById('depth-badge'),
+      hint: document.getElementById('hint-banner'),
+      reelPanel: document.getElementById('reel-panel'),
+      tensionFill: document.getElementById('tension-fill'),
+      progressFill: document.getElementById('progress-fill'),
+      actionBtn: document.getElementById('action-btn'),
+      btnMaps: document.getElementById('btn-maps'),
+      btnShop: document.getElementById('btn-shop'),
+      btnLog: document.getElementById('btn-log'),
+      btnSound: document.getElementById('btn-sound'),
+      catchOverlay: document.getElementById('catch-overlay'),
+      catchRarity: document.getElementById('catch-rarity'),
+      catchTitle: document.getElementById('catch-title'),
+      catchSprite: document.getElementById('catch-sprite'),
+      catchWeight: document.getElementById('catch-weight'),
+      catchValue: document.getElementById('catch-value'),
+      catchRecord: document.getElementById('catch-record'),
+      catchDesc: document.getElementById('catch-desc'),
+      btnCatchOk: document.getElementById('btn-catch-ok'),
+      mapsModal: document.getElementById('maps-modal'),
+      mapsCoins: document.getElementById('maps-coins'),
+      mapsList: document.getElementById('maps-list'),
+      btnMapsClose: document.getElementById('btn-maps-close'),
+      shopModal: document.getElementById('shop-modal'),
+      shopCoins: document.getElementById('shop-coins'),
+      shopList: document.getElementById('shop-list'),
+      btnShopClose: document.getElementById('btn-shop-close'),
+      logModal: document.getElementById('log-modal'),
+      logCount: document.getElementById('log-count'),
+      logGrid: document.getElementById('log-grid'),
+      btnLogClose: document.getElementById('btn-log-close'),
     };
-  }
-
-  loadSave() {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return this.defaultSave();
-      const parsed = JSON.parse(raw);
-      return {
-        ...this.defaultSave(),
-        ...parsed,
-        upgrades: { ...this.defaultSave().upgrades, ...(parsed.upgrades || {}) },
-        log: parsed.log || {},
-      };
-    } catch (_) {
-      return this.defaultSave();
-    }
   }
 
   persist() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(this.save));
-    } catch (_) {
-      // Ignore storage errors
+    } catch {
+      // Ignore storage quota errors
     }
   }
 
   getStats() {
     const u = this.save.upgrades;
     return {
-      maxCastFrac: 0.56 + (u.rod - 1) * 0.095,
-      reelPower: 0.34 + (u.rod - 1) * 0.065,
-      maxSinkFrac: 0.44 + (u.line - 1) * 0.125,
-      tensionResist: 1.0 - (u.line - 1) * 0.10,
-      attractRadius: 28 + (u.lure - 1) * 7,
-      luckBonus: (u.lure - 1) * 0.28,
-      coinMult: 1 + (u.charm - 1) * 0.25,
-      biteWindow: 1.38 + (u.charm - 1) * 0.14,
+      maxCastFrac: 0.56 + (u.rod - 1) * 0.10,
+      maxDepthFrac: 0.48 + (u.line - 1) * 0.125,
+      reelSpeed: 0.25 + (u.rod - 1) * 0.055,
+      tensionDecay: 0.44 + (u.line - 1) * 0.06,
+      lineStrength: 1 + (u.line - 1) * 0.26,
+      lureLuck: 1 + (u.lure - 1) * 0.38,
+      attractRadius: 34 + (u.lure - 1) * 10,
+      coinMult: 1 + ((u.charm || 1) - 1) * 0.25,
+      biteBonus: ((u.charm || 1) - 1) * 0.14,
     };
   }
 
   resize() {
-    const sw = window.innerWidth;
-    const sh = window.innerHeight;
-    const aspect = sw / Math.max(1, sh);
-    this.isPortrait = aspect < 0.92;
+    const w = Math.max(240, window.innerWidth);
+    const h = Math.max(240, window.innerHeight);
+    this.isPortrait = h > w * 1.05;
 
-    if (this.isPortrait) {
-      this.vw = 192;
-      this.vh = clamp(Math.round(this.vw / aspect), 256, 400);
-    } else {
-      this.vh = 216;
-      this.vw = clamp(Math.round(this.vh * aspect), 264, 440);
-    }
+    const targetPixelSize = this.isPortrait ? Math.max(2, Math.floor(w / 185)) : Math.max(3, Math.floor(w / 320));
+    this.vw = clamp(Math.round(w / targetPixelSize), 170, 360);
+    this.vh = clamp(Math.round(h / targetPixelSize), 156, 360);
 
     this.canvas.width = this.vw;
     this.canvas.height = this.vh;
     this.ctx.imageSmoothingEnabled = false;
 
-    this.waterY = Math.round(this.vh * (this.isPortrait ? 0.33 : 0.40));
-    this.pierEndX = this.isPortrait ? 56 : Math.round(clamp(this.vw * 0.22, 66, 92));
-    this.pierY = this.waterY - 12;
-    const anglerH = this.sprites.angler.idle0.h;
-    this.anglerX = this.pierEndX - 20;
-    this.anglerY = this.pierY - anglerH + 1;
+    this.waterY = Math.round(this.vh * (this.isPortrait ? 0.34 : 0.38));
+    this.pierY = this.waterY - 14;
+    this.pierEndX = clamp(Math.round(this.vw * (this.isPortrait ? 0.33 : 0.24)), 54, 86);
+    this.anglerX = this.pierEndX - 21;
+    this.anglerY = this.pierY - this.sprites.angler.idle0.h + 1;
 
-    this.rebuildSeabedDecor();
+    this.initSceneryPositions();
+  }
+
+  initWorldScenery() {
+    this.stars = Array.from({ length: 42 }, () => ({
+      x: Math.random(),
+      y: Math.random() * 0.78,
+      phase: Math.random() * Math.PI * 2,
+      bright: Math.random() > 0.65,
+    }));
+
+    this.clouds = Array.from({ length: 5 }, (_, i) => ({
+      x: i * 74 + rand(0, 26),
+      y: rand(8, Math.max(18, this.waterY - 26)),
+      speed: rand(2.2, 5.0),
+      sprite: i % 2 === 0 ? 'cloud0' : 'cloud1',
+    }));
+
+    this.birds = Array.from({ length: 3 }, (_, i) => ({
+      x: rand(30, this.vw),
+      y: rand(12, Math.max(20, this.waterY - 22)),
+      speed: rand(10, 17),
+      phase: i * 2.1,
+    }));
+
+    this.initSceneryPositions();
+    this.initWeatherParticles();
+  }
+
+  initWeatherParticles() {
+    const map = this.getCurrentMap();
+    this.weatherParticles = [];
+    if (map.weather === 'snow') {
+      for (let i = 0; i < 28; i++) {
+        this.weatherParticles.push({
+          x: rand(0, this.vw),
+          y: rand(0, this.waterY + 4),
+          vx: rand(-8, -3),
+          vy: rand(10, 20),
+          size: Math.random() > 0.7 ? 2 : 1,
+          color: Math.random() > 0.35 ? '#eef7ff' : '#bae6fd',
+        });
+      }
+    } else if (map.weather === 'embers') {
+      for (let i = 0; i < 22; i++) {
+        this.weatherParticles.push({
+          x: rand(0, this.vw),
+          y: rand(6, this.waterY),
+          vx: rand(-5, 6),
+          vy: rand(-14, -6),
+          size: 1,
+          color: Math.random() > 0.4 ? '#fb923c' : '#fef08a',
+        });
+      }
+    }
+  }
+
+  initSceneryPositions() {
+    this.kelp = [];
+    for (let i = 0; i < 12; i++) {
+      this.kelp.push({
+        x: Math.round(this.pierEndX + 10 + (i / 11) * Math.max(40, this.vw - this.pierEndX - 18)),
+        height: Math.round(rand(14, 30)),
+        phase: rand(0, Math.PI * 2),
+        idx: i,
+      });
+    }
+    this.pebbles = Array.from({ length: 24 }, () => ({
+      x: Math.round(rand(4, this.vw - 4)),
+      dy: Math.round(rand(2, 9)),
+      w: Math.random() > 0.5 ? 2 : 1,
+      color: Math.random() > 0.5 ? '#59422e' : '#b89463',
+    }));
+    this.corals = [
+      { x: Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.16), sprite: 'coral0' },
+      { x: Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.52), sprite: 'coral1' },
+      { x: Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.86), sprite: 'coral0' },
+    ];
+    this.fireflies = Array.from({ length: 7 }, (_, i) => ({
+      x: Math.round(rand(6, this.pierEndX + 26)),
+      y: Math.round(rand(Math.max(8, this.pierY - 26), this.pierY - 3)),
+      phase: i * 1.3 + rand(0, 1.5),
+    }));
   }
 
   getSeabedY(x) {
-    const waterSpan = Math.max(1, this.vw - this.pierEndX);
-    const t = clamp((x - this.pierEndX + 10) / waterSpan, 0, 1);
-    const shallowEdge = this.vh - (this.isPortrait ? 62 : 28);
-    const deepFloor = this.vh - (this.isPortrait ? 44 : 14);
-    const base = lerp(shallowEdge, deepFloor, Math.pow(t, 0.75));
-    const wave = Math.sin(x * 0.065) * 2.5 + Math.cos(x * 0.14) * 1.4;
-    return Math.round(clamp(base + wave, this.waterY + 34, this.vh - 10));
+    const base = this.vh - 14;
+    const slope = x < this.pierEndX + 20 ? -Math.max(0, (this.pierEndX + 20 - x) * 0.12) : 0;
+    return Math.round(base + slope + Math.sin(x * 0.055) * 3 + Math.cos(x * 0.13) * 1.5);
   }
 
-  getWaterDepthAt(x) {
-    return Math.max(30, this.getSeabedY(x) - this.waterY);
+  getDepthBand(y) {
+    const ratio = clamp((y - this.waterY) / Math.max(1, this.vh - 14 - this.waterY), 0, 1);
+    if (ratio < 0.36) return { idx: 0, name: 'SHALLOW' };
+    if (ratio < 0.70) return { idx: 1, name: 'MIDWATER' };
+    return { idx: 2, name: 'DEEP' };
   }
 
-  initEnvironment() {
-    this.stars = [];
-    for (let i = 0; i < 42; i++) {
-      this.stars.push({
-        x: Math.random(),
-        y: Math.random() * 0.85,
-        phase: Math.random() * Math.PI * 2,
-        bright: Math.random() > 0.65,
-      });
+  selectMap(mapId) {
+    const target = getMapById(mapId);
+    if (!target) return;
+    if (!this.save.unlockedMaps.includes(target.id)) {
+      if (this.save.coins < target.cost) return;
+      this.save.coins -= target.cost;
+      this.save.unlockedMaps.push(target.id);
+      sound.playBuy();
+    } else {
+      sound.playJig();
     }
 
-    this.clouds = [
-      { x: 24, y: 12, speed: 2.2, sprite: 'cloud0' },
-      { x: 118, y: 23, speed: 1.5, sprite: 'cloud1' },
-      { x: 225, y: 10, speed: 2.6, sprite: 'cloud2' },
-      { x: 310, y: 26, speed: 1.8, sprite: 'cloud0' },
-    ];
+    this.save.currentMap = target.id;
+    this.persist();
 
-    this.birds = [
-      { x: 70, y: 26, speed: 14, phase: 0 },
-      { x: 185, y: 18, speed: 11, phase: 2.1 },
-    ];
-
-    this.rebuildSeabedDecor();
+    // Reset active cast cleanly and refresh biome
+    this.state = 'IDLE';
+    this.activeFish = null;
+    this.chargeHold = false;
+    this.reelHold = false;
+    this.tension = 0;
+    this.progress = 0;
+    this.bubbles = [];
+    this.ripples = [];
+    this.particles = [];
+    this.initWeatherParticles();
+    this.populateFish();
+    this.closeModals();
+    this.updateHUD();
+    this.updateControlsUI();
+    this.spawnFloat(this.vw * 0.5, this.waterY - 12, target.name.toUpperCase(), target.accent);
   }
 
-  rebuildSeabedDecor() {
-    this.kelp = [];
-    const count = Math.floor(this.vw / 18);
-    for (let i = 0; i < count; i++) {
-      const x = Math.round(14 + i * 18 + (i % 3) * 4);
-      if (x > this.vw - 8) continue;
-      this.kelp.push({
-        x,
-        height: 10 + ((i * 7) % 16),
-        phase: i * 1.3,
-        color: i % 2 === 0 ? '#1b6b59' : '#248269',
-      });
-    }
+  pickSpeciesForDepth(depthFrac) {
+    const stats = this.getStats();
+    const mapSpecies = this.getMapSpecies();
+    const pool = mapSpecies.filter((sp) => depthFrac >= sp.minDepth - 0.08 && depthFrac <= sp.maxDepth + 0.08);
+    const list = pool.length ? pool : mapSpecies;
 
-    this.pebbles = [];
-    for (let i = 0; i < Math.floor(this.vw / 9); i++) {
-      const x = Math.round(6 + i * 9 + ((i * 13) % 5));
-      this.pebbles.push({
-        x,
-        dy: (i % 3) + 2,
-        w: 2 + (i % 3),
-        color: i % 4 === 0 ? '#d99b66' : i % 3 === 0 ? '#5c6b7a' : '#857863',
-      });
-    }
-
-    this.corals = [];
-    const coralSpots = [0.20, 0.52, 0.84];
-    coralSpots.forEach((frac, idx) => {
-      const cx = Math.round(this.pierEndX + (this.vw - this.pierEndX - 16) * frac);
-      this.corals.push({ x: cx, sprite: idx % 2 === 0 ? 'coral0' : 'coral1' });
-    });
-
-    this.fireflies = [];
-    for (let i = 0; i < 6; i++) {
-      this.fireflies.push({
-        x: Math.round(8 + (i / 6) * (this.pierEndX + 24)),
-        y: Math.round(this.pierY - 8 - (i % 3) * 10),
-        phase: i * 1.4,
-      });
-    }
-  }
-
-  pickSpeciesForDepth(normDepth) {
-    const luck = this.getStats().luckBonus;
-    const candidates = FISH_SPECIES.filter(
-      (sp) => normDepth >= sp.minDepth - 0.06 && normDepth <= sp.maxDepth + 0.06
-    );
-    const pool = candidates.length ? candidates : FISH_SPECIES;
     let total = 0;
-    const weights = pool.map((sp) => {
-      const base = RARITY_META[sp.rarity].weight;
-      const mult = sp.rarity === 'common' ? 1 : 1 + luck * (sp.rarity === 'legendary' ? 2.2 : 1.3);
-      const w = base * mult;
+    const weights = list.map((sp) => {
+      const rarityBoost =
+        sp.rarity === 'mythic' ? Math.pow(stats.lureLuck, 1.8) :
+        sp.rarity === 'legendary' ? Math.pow(stats.lureLuck, 1.55) :
+        sp.rarity === 'rare' ? Math.pow(stats.lureLuck, 1.25) :
+        sp.rarity === 'uncommon' ? Math.pow(stats.lureLuck, 1.05) :
+        1;
+      const w = sp.spawnWeight * rarityBoost;
       total += w;
       return w;
     });
-    let r = Math.random() * total;
-    for (let i = 0; i < pool.length; i++) {
-      r -= weights[i];
-      if (r <= 0) return pool[i];
+
+    let roll = Math.random() * total;
+    for (let i = 0; i < list.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return list[i];
     }
-    return pool[pool.length - 1];
+    return list[0];
   }
 
   spawnFish(fromEdge = false) {
-    const roll = Math.random();
-    let normDepth;
-    if (roll < 0.36) normDepth = rand(0.10, 0.36);
-    else if (roll < 0.72) normDepth = rand(0.36, 0.68);
-    else normDepth = rand(0.68, 0.90);
-
-    const species = this.pickSpeciesForDepth(normDepth);
-    const actualNormDepth = clamp(normDepth, species.minDepth, species.maxDepth);
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    const minX = this.pierEndX + 10;
-    const maxX = this.vw - 12;
-    const x = fromEdge ? (dir === 1 ? minX - 18 : maxX + 18) : rand(minX, maxX);
-    const depthSpan = Math.max(36, this.getWaterDepthAt(clamp(x, minX, maxX)) - 12);
-    const y = this.waterY + 10 + actualNormDepth * depthSpan;
+    const waterH = Math.max(40, this.vh - 18 - this.waterY);
+    const depthFrac = clamp(Math.pow(Math.random(), 0.92), 0.08, 0.95);
+    const species = this.pickSpeciesForDepth(depthFrac);
+    const clampedFrac = clamp(depthFrac, species.minDepth, species.maxDepth);
+    const y = this.waterY + 8 + clampedFrac * (waterH - 12);
+    const dir = Math.random() > 0.5 ? 1 : -1;
+    const minX = this.pierEndX + 12;
+    const maxX = this.vw - 10;
+    const x = fromEdge ? (dir > 0 ? minX - 12 : maxX + 14) : rand(minX, maxX);
 
     return {
       species,
       x,
       y,
-      baseY: y,
-      normDepth: actualNormDepth,
+      homeY: y,
       dir,
-      speed: species.speed * rand(0.75, 1.25),
+      speed: species.speed * rand(0.85, 1.18),
       phase: rand(0, Math.PI * 2),
-      ai: 'SWIM',
-      nibbleCount: 0,
-      nibbleTimer: 0,
-      cooldown: 0,
+      ai: 'CRUISE',
+      fleeTimer: 0,
+      turnTimer: rand(2.5, 7),
     };
   }
 
-  spawnInitialFishes() {
+  populateFish() {
     this.fishes = [];
-    const targetCount = this.isPortrait ? 9 : 12;
+    const targetCount = this.isPortrait ? 9 : 13;
     for (let i = 0; i < targetCount; i++) {
       this.fishes.push(this.spawnFish(false));
     }
   }
 
-  isModalOpen() {
-    return (
-      !this.ui.shopModal.classList.contains('hidden') ||
-      !this.ui.logModal.classList.contains('hidden')
-    );
-  }
-
   bindEvents() {
     window.addEventListener('resize', () => this.resize());
+    window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 120));
 
-    const onPressStart = (e) => {
-      if (this.isModalOpen()) return;
+    const startPrimary = (e) => {
+      if (this.activeModal) return;
+      if (e) e.preventDefault();
       sound.unlock();
-      if (this.state === 'CAUGHT') {
-        this.dismissCatch();
-        return;
-      }
-      if (e.pointerId !== undefined && this.activePointerId !== null && this.activePointerId !== e.pointerId) {
-        return;
-      }
-      if (e.pointerId !== undefined) this.activePointerId = e.pointerId;
-      this.handlePrimaryDown();
+      this.onPrimaryDown();
+    };
+    const endPrimary = (e) => {
+      if (e) e.preventDefault();
+      this.onPrimaryUp();
     };
 
-    const onPressEnd = (e) => {
-      if (e.pointerId !== undefined && this.activePointerId !== null && this.activePointerId !== e.pointerId) {
-        return;
-      }
-      this.activePointerId = null;
-      this.handlePrimaryUp();
-    };
-
-    this.canvas.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      onPressStart(e);
-    });
-    window.addEventListener('pointerup', onPressEnd);
-    window.addEventListener('pointercancel', onPressEnd);
-
-    this.ui.actionBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onPressStart(e);
-    });
-    this.ui.actionBtn.addEventListener('pointerup', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onPressEnd(e);
-    });
+    this.canvas.addEventListener('pointerdown', startPrimary, { passive: false });
+    this.el.actionBtn.addEventListener('pointerdown', startPrimary, { passive: false });
+    window.addEventListener('pointerup', endPrimary, { passive: false });
+    window.addEventListener('pointercancel', endPrimary, { passive: false });
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
-      if (e.code === 'Escape') {
-        this.closeModals();
-        return;
-      }
-      if (this.isModalOpen()) return;
-      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Enter') {
-        e.preventDefault();
-        sound.unlock();
+      if (e.code === 'Space' || e.code === 'Enter') {
         if (this.state === 'CAUGHT') {
+          e.preventDefault();
           this.dismissCatch();
           return;
         }
-        this.handlePrimaryDown();
+        if (this.activeModal) return;
+        e.preventDefault();
+        sound.unlock();
+        this.onPrimaryDown();
+      } else if (e.code === 'Escape') {
+        this.closeModals();
+      } else if (e.code === 'KeyM') {
+        this.activeModal === 'maps' ? this.closeModals() : this.openModal('maps');
       }
     });
 
     window.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Enter') {
-        this.handlePrimaryUp();
+      if (e.code === 'Space' || e.code === 'Enter') {
+        this.onPrimaryUp();
       }
     });
 
-    this.ui.btnShop.addEventListener('click', (e) => {
-      e.stopPropagation();
-      sound.unlock();
-      this.openShop();
+    this.el.btnMaps.addEventListener('click', () => {
+      sound.unlock(); sound.playJig(); this.openModal('maps');
     });
-    this.ui.btnLog.addEventListener('click', (e) => {
-      e.stopPropagation();
-      sound.unlock();
-      this.openLog();
+    this.el.btnShop.addEventListener('click', () => {
+      sound.unlock(); sound.playJig(); this.openModal('shop');
     });
-    this.ui.btnMute.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.save.muted = !this.save.muted;
-      sound.setMuted(this.save.muted);
-      if (!this.save.muted) sound.unlock();
+    this.el.btnLog.addEventListener('click', () => {
+      sound.unlock(); sound.playJig(); this.openModal('log');
+    });
+    this.el.btnSound.addEventListener('click', () => {
+      sound.unlock();
+      this.save.sound = !this.save.sound;
+      sound.setMuted(!this.save.sound);
+      if (this.save.sound) sound.playJig();
       this.persist();
       this.updateHUD();
     });
 
-    document.querySelectorAll('[data-close-modal]').forEach((btn) => {
-      btn.addEventListener('click', () => this.closeModals());
-    });
-    [this.ui.shopModal, this.ui.logModal].forEach((modal) => {
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) this.closeModals();
-      });
-    });
+    this.el.btnCatchOk.addEventListener('click', () => { sound.playJig(); this.dismissCatch(); });
+    this.el.btnMapsClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
+    this.el.btnShopClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
+    this.el.btnLogClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
 
-    this.ui.catchContinue.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.dismissCatch();
-    });
-    this.ui.catchOverlay.addEventListener('click', (e) => {
-      if (e.target === this.ui.catchOverlay) this.dismissCatch();
-    });
+    for (const backdrop of [this.el.mapsModal, this.el.shopModal, this.el.logModal]) {
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) { sound.playJig(); this.closeModals(); }
+      });
+    }
   }
 
-  handlePrimaryDown() {
-    this.pointerHeld = true;
-    this.holdDuration = 0;
-
-    if (this.ui.hintBanner && !this.ui.hintBanner.classList.contains('hidden')) {
-      this.ui.hintBanner.classList.add('hidden');
-    }
-
+  onPrimaryDown() {
     if (this.state === 'IDLE') {
       this.state = 'CHARGING';
-      this.stateTimer = 0;
-      this.chargePower = 0.18;
+      this.chargeHold = true;
+      this.chargePower = 0.08;
       this.chargeDir = 1;
-      this.updateActionUI();
+      this.updateControlsUI();
+    } else if (this.state === 'WAITING') {
+      this.spawnSplash(this.bobberX, this.waterY, 4);
+      this.resetToIdle('LINE RETRIEVED');
     } else if (this.state === 'BITE') {
-      this.setHook();
+      this.hookFish();
+    } else if (this.state === 'REELING') {
+      this.reelHold = true;
     }
   }
 
-  handlePrimaryUp() {
-    if (!this.pointerHeld) return;
-    const heldFor = this.holdDuration;
-    this.pointerHeld = false;
-    this.holdDuration = 0;
-
-    if (this.state === 'CHARGING') {
+  onPrimaryUp() {
+    if (this.state === 'CHARGING' && this.chargeHold) {
+      this.chargeHold = false;
       this.launchCast();
-    } else if (this.state === 'WAITING' && heldFor < 0.24) {
-      this.performJig();
+    }
+    this.reelHold = false;
+  }
+
+  launchCast() {
+    const stats = this.getStats();
+    const minCastX = this.pierEndX + 22;
+    const maxCastX = this.pierEndX + (this.vw - this.pierEndX - 18) * stats.maxCastFrac;
+    this.castTargetX = clamp(lerp(minCastX, maxCastX, this.chargePower), minCastX, this.vw - 14);
+
+    const waterH = Math.max(36, this.vh - 20 - this.waterY);
+    const depthFrac = clamp(0.14 + this.chargePower * stats.maxDepthFrac, 0.14, 0.92);
+    this.targetDepthY = this.waterY + 10 + depthFrac * (waterH - 12);
+
+    const rod = this.getRodTipPos();
+    this.castStartX = rod.tipX;
+    this.castStartY = rod.tipY;
+    this.bobberX = rod.tipX;
+    this.bobberY = rod.tipY;
+    this.castT = 0;
+    this.castFollowThrough = 0.24;
+    this.state = 'CASTING';
+    sound.playCast();
+    this.updateControlsUI();
+  }
+
+  hookFish() {
+    if (!this.activeFish) return;
+    this.state = 'REELING';
+    this.activeFish.ai = 'HOOKED';
+    this.tension = 0.28;
+    this.progress = 0.14;
+    this.reelHold = true;
+    this.fishThrashing = false;
+    this.fishFightTimer = rand(0.55, 1.15);
+    this.shakeTime = 0.18;
+    this.shakeMag = 2;
+    sound.playHookSet();
+    this.spawnSplash(this.bobberX, this.waterY, 10);
+    this.spawnRipple(this.bobberX, this.waterY);
+    this.spawnFloat(this.bobberX, this.waterY - 12, 'HOOKED!', '#fef08a');
+    this.updateControlsUI();
+  }
+
+  resetToIdle(toastText) {
+    if (this.activeFish) {
+      this.activeFish.ai = 'FLEE';
+      this.activeFish.fleeTimer = 2.0;
+      this.activeFish.dir = 1;
+      this.activeFish = null;
+    }
+    this.state = 'IDLE';
+    this.reelHold = false;
+    this.chargeHold = false;
+    this.tension = 0;
+    this.progress = 0;
+    this.rodFlex = 0;
+    if (toastText) {
+      this.spawnFloat(this.bobberX, this.waterY - 10, toastText, '#f87171');
+    }
+    this.updateControlsUI();
+  }
+
+  startLanding() {
+    this.state = 'LANDING';
+    this.reelHold = false;
+    this.landingT = 0;
+    this.landingStartX = this.activeFish.x;
+    this.landingStartY = this.activeFish.y;
+    this.spawnSplash(this.activeFish.x, this.waterY, 12);
+    this.spawnRipple(this.activeFish.x, this.waterY);
+    sound.playSplash();
+    this.updateControlsUI();
+  }
+
+  completeCatch() {
+    const sp = this.activeFish.species;
+    const weight = Number(lerp(sp.minKg, sp.maxKg, Math.pow(Math.random(), 0.72)).toFixed(2));
+    const sizeBonus = 0.85 + ((weight - sp.minKg) / Math.max(0.01, sp.maxKg - sp.minKg)) * 0.45;
+    const value = Math.max(5, Math.round(sp.value * sizeBonus * this.getStats().coinMult));
+
+    const prev = this.save.log[sp.id];
+    const isNew = !prev;
+    const isRecord = !prev || weight > prev.bestKg;
+
+    this.save.log[sp.id] = {
+      count: (prev ? prev.count : 0) + 1,
+      bestKg: isRecord ? weight : prev.bestKg,
+    };
+    this.save.coins += value;
+    this.save.totalCaught += 1;
+    this.persist();
+
+    this.fishes = this.fishes.filter((f) => f !== this.activeFish);
+    this.activeFish = null;
+    this.fishes.push(this.spawnFish(true));
+
+    this.lastCatchInfo = { species: sp, weight, value, isNew, isRecord };
+    this.state = 'CAUGHT';
+    this.activeModal = 'catch';
+    sound.playCatch(sp.rarity);
+
+    const rMeta = RARITY_META[sp.rarity];
+    this.el.catchRarity.textContent = rMeta.label;
+    this.el.catchRarity.style.background = rMeta.bg;
+    this.el.catchRarity.style.color = rMeta.color;
+    this.el.catchTitle.textContent = sp.name.toUpperCase();
+    this.el.catchSprite.src = this.spriteUrls[sp.id];
+    this.el.catchWeight.textContent = `${weight.toFixed(2)} kg`;
+    this.el.catchValue.textContent = `+${value} G`;
+    this.el.catchRecord.textContent = isNew ? 'NEW!' : isRecord ? 'BEST!' : `${this.save.log[sp.id].count}x`;
+    this.el.catchDesc.textContent = sp.desc;
+    this.el.catchOverlay.classList.remove('hidden');
+
+    this.updateHUD();
+    this.updateControlsUI();
+  }
+
+  dismissCatch() {
+    this.el.catchOverlay.classList.add('hidden');
+    this.activeModal = null;
+    this.lastCatchInfo = null;
+    this.state = 'IDLE';
+    this.updateControlsUI();
+  }
+
+  openModal(which) {
+    this.closeModals();
+    this.activeModal = which;
+    if (which === 'maps') {
+      this.renderMaps();
+      this.el.mapsModal.classList.remove('hidden');
+    } else if (which === 'shop') {
+      this.renderShop();
+      this.el.shopModal.classList.remove('hidden');
+    } else if (which === 'log') {
+      this.renderLog();
+      this.el.logModal.classList.remove('hidden');
+    }
+  }
+
+  closeModals() {
+    this.el.mapsModal.classList.add('hidden');
+    this.el.shopModal.classList.add('hidden');
+    this.el.logModal.classList.add('hidden');
+    if (this.activeModal !== 'catch') this.activeModal = null;
+  }
+
+  renderMaps() {
+    this.el.mapsCoins.textContent = this.save.coins;
+    this.el.mapsList.innerHTML = '';
+
+    for (const m of MAPS) {
+      const unlocked = this.save.unlockedMaps.includes(m.id);
+      const isCurrent = this.save.currentMap === m.id;
+      const nativeSpecies = this.getMapSpecies(m.id);
+      const caughtHere = nativeSpecies.filter((sp) => this.save.log[sp.id]).length;
+      const canBuy = !unlocked && this.save.coins >= m.cost;
+
+      const card = document.createElement('div');
+      card.className = `map-card${isCurrent ? ' active-map' : ''}`;
+
+      const fishStripHtml = nativeSpecies
+        .slice(0, 6)
+        .map((sp) => `<img src="${this.spriteUrls[sp.id]}" class="${this.save.log[sp.id] ? '' : 'sil'}" alt="${this.save.log[sp.id] ? sp.name : 'Unknown fish'}" />`)
+        .join('');
+
+      let btnLabel = isCurrent ? 'HERE' : unlocked ? 'TRAVEL' : `UNLOCK ${m.cost} G`;
+      let btnClass = isCurrent ? 'pixel-btn' : unlocked ? 'pixel-btn accent-cyan' : 'pixel-btn accent-gold';
+
+      card.innerHTML = `
+        <div class="map-top">
+          <div class="map-title-wrap">
+            <span class="map-swatch" style="background:${m.accent}"></span>
+            <span class="map-name">${m.name.toUpperCase()}</span>
+          </div>
+          <span class="map-tag">${caughtHere}/${nativeSpecies.length} FISH</span>
+        </div>
+        <div class="map-desc">${m.desc}</div>
+        <div class="map-bottom">
+          <div class="map-fish-strip">${fishStripHtml}</div>
+          <button class="${btnClass}" type="button" ${isCurrent || (!unlocked && !canBuy) ? 'disabled' : ''}>${btnLabel}</button>
+        </div>
+      `;
+
+      const btn = card.querySelector('button');
+      if (!isCurrent && (unlocked || canBuy)) {
+        btn.addEventListener('click', () => this.selectMap(m.id));
+      }
+      this.el.mapsList.appendChild(card);
+    }
+  }
+
+  renderShop() {
+    this.el.shopCoins.textContent = this.save.coins;
+    this.el.shopList.innerHTML = '';
+    for (const u of UPGRADES) {
+      const lv = this.save.upgrades[u.id] || 1;
+      const maxed = lv >= u.maxLevel;
+      const cost = getUpgradeCost(u, lv);
+      const canBuy = !maxed && this.save.coins >= cost;
+
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      row.innerHTML = `
+        <div class="shop-info">
+          <div class="shop-title">${u.name} <span class="lv-tag">LV ${lv}/${u.maxLevel}</span></div>
+          <div class="shop-desc">${u.desc}</div>
+          <div class="shop-perk">GEAR: ${u.tiers[lv - 1]}${maxed ? ' (MAX)' : ' → ' + u.tiers[lv]}</div>
+        </div>
+        <button class="pixel-btn ${canBuy ? 'accent-gold' : ''}" type="button" ${canBuy ? '' : 'disabled'}>
+          ${maxed ? 'MAX' : `${cost} G`}
+        </button>
+      `;
+      const btn = row.querySelector('button');
+      if (canBuy) {
+        btn.addEventListener('click', () => {
+          this.save.coins -= cost;
+          this.save.upgrades[u.id] = lv + 1;
+          this.persist();
+          sound.playBuy();
+          this.updateHUD();
+          this.renderShop();
+        });
+      }
+      this.el.shopList.appendChild(row);
+    }
+  }
+
+  renderLog() {
+    const discovered = Object.keys(this.save.log).length;
+    this.el.logCount.textContent = `${discovered} / ${FISH_SPECIES.length}`;
+    this.el.logGrid.innerHTML = '';
+    for (const sp of FISH_SPECIES) {
+      const entry = this.save.log[sp.id];
+      const rMeta = RARITY_META[sp.rarity];
+      const mapCodes = (sp.maps || ['harbor'])
+        .map((id) => getMapById(id).shortTag)
+        .join(' · ');
+      const card = document.createElement('div');
+      card.className = `log-card ${entry ? 'discovered' : 'locked'}`;
+      card.innerHTML = `
+        <div class="log-rarity" style="color:${entry ? rMeta.color : '#64748b'}">${rMeta.label}</div>
+        <div class="log-img-wrap">
+          <img src="${this.spriteUrls[sp.id]}" alt="${entry ? sp.name : 'Undiscovered fish'}" />
+        </div>
+        <div class="log-name">${entry ? sp.name : '???'}</div>
+        <div class="log-stats">${entry ? `${entry.count}x &bull; ${entry.bestKg.toFixed(2)}kg` : sp.zone.toUpperCase()}</div>
+        <div class="log-maps">${mapCodes}</div>
+      `;
+      this.el.logGrid.appendChild(card);
+    }
+  }
+
+  updateHUD() {
+    this.el.coins.textContent = this.save.coins;
+    this.el.caught.textContent = this.save.totalCaught;
+    this.el.btnSound.textContent = this.save.sound ? 'SFX' : 'MUTE';
+    this.el.btnSound.classList.toggle('muted', !this.save.sound);
+
+    const t = this.timeOfDay;
+    const label = t < 0.14 || t >= 0.86 ? 'NIGHT' : t < 0.25 ? 'DAWN' : t < 0.68 ? 'DAY' : 'SUNSET';
+    this.el.time.textContent = label;
+  }
+
+  updateControlsUI() {
+    const btn = this.el.actionBtn;
+    const hint = this.el.hint;
+    btn.classList.remove('is-bite', 'is-reel', 'is-warn');
+    this.el.reelPanel.classList.toggle('hidden', this.state !== 'REELING');
+
+    if (this.state === 'IDLE') {
+      btn.textContent = 'HOLD TO CAST';
+      hint.textContent = 'HOLD BUTTON OR SCREEN TO CAST';
+    } else if (this.state === 'CHARGING') {
+      btn.textContent = 'RELEASE TO CAST!';
+      hint.textContent = 'HIGHER POWER = DEEPER WATER';
+    } else if (this.state === 'CASTING') {
+      btn.textContent = 'CASTING...';
+      hint.textContent = 'WATCH THE BOBBER!';
+    } else if (this.state === 'WAITING') {
+      btn.textContent = 'PULL BACK';
+      hint.textContent = 'WAIT FOR A FISH TO BITE...';
+    } else if (this.state === 'BITE') {
+      btn.textContent = 'HOOK IT NOW!';
+      btn.classList.add('is-bite');
+      hint.textContent = 'BITE! TAP FAST!';
+    } else if (this.state === 'REELING') {
+      btn.textContent = this.fishThrashing ? 'EASE UP!' : 'HOLD TO REEL!';
+      btn.classList.add(this.fishThrashing ? 'is-warn' : 'is-reel');
+      hint.textContent = this.fishThrashing ? 'FISH FIGHTING — RELEASE TO COOL LINE!' : 'HOLD TO REEL IN!';
+    } else if (this.state === 'LANDING') {
+      btn.textContent = 'LANDING!';
+      hint.textContent = 'NICE CATCH!';
+    } else if (this.state === 'CAUGHT') {
+      btn.textContent = 'CAUGHT!';
+      hint.textContent = 'FISH ADDED TO LOG';
     }
   }
 
   getAnglerPose() {
-    if (this.state === 'CHARGING') return this.chargePower > 0.55 ? 'windup1' : 'windup0';
-    if (this.state === 'CASTING') return this.castFlightT < 0.45 ? 'cast0' : 'cast1';
-    if (this.state === 'WAITING' && this.jigAnimTimer > 0) return 'jig';
-    if (this.state === 'BITE') return 'bite';
+    if (this.state === 'CHARGING') {
+      return this.chargePower > 0.55 ? 'charge1' : 'charge0';
+    }
+    if (this.state === 'CASTING') {
+      return this.castFollowThrough > 0 ? 'cast0' : 'cast1';
+    }
+    if (this.state === 'WAITING') {
+      return Math.floor(this.time * 1.6) % 2 === 0 ? 'wait0' : 'wait1';
+    }
+    if (this.state === 'BITE') {
+      return Math.floor(this.time * 12) % 2 === 0 ? 'bite0' : 'bite1';
+    }
     if (this.state === 'REELING') {
-      if (this.pointerHeld) {
-        const frames = ['reel0', 'reel1', 'reel2', 'reel1'];
-        return frames[Math.floor(this.time * 12) % frames.length];
-      }
-      return this.fishThrashing ? 'reel1' : 'reel0';
+      if (this.fishThrashing && this.tension > 0.65) return 'reelHard';
+      if (this.reelHold) return Math.floor(this.time * 9) % 2 === 0 ? 'reel0' : 'reel1';
+      return 'reel0';
     }
     if (this.state === 'LANDING' || this.state === 'CAUGHT') {
-      return Math.floor(this.time * 5.5) % 2 === 0 ? 'celebrate0' : 'celebrate1';
+      return Math.floor(this.time * 5) % 2 === 0 ? 'celebrate0' : 'celebrate1';
     }
-    // Periodic blink & gentle 4-beat breathing / bandana flutter
-    const blinkCycle = this.time % 4.6;
-    if (blinkCycle > 4.44) return 'idleBlink';
-    const idleCycle = ['idle0', 'idle1', 'idle2', 'idle0'];
-    return idleCycle[Math.floor(this.time * 2.6) % idleCycle.length];
+    const tick = Math.floor(this.time * 2.2) % 10;
+    if (tick === 7) return 'idleBlink';
+    return tick % 2 === 0 ? 'idle0' : 'idle1';
   }
 
   getRodTipPos() {
@@ -522,791 +841,358 @@ class PierlineGame {
     const drawY = this.pierY - spr.h + 1;
     const handX = this.anglerX + spr.hand[0];
     const handY = drawY + spr.hand[1];
+    const rodLen = 27 + (this.save.upgrades.rod - 1) * 2.2;
 
+    let angle = -0.62;
     if (this.state === 'CHARGING') {
-      const pull = this.chargePower * 8;
-      return {
-        handX, handY,
-        tipX: handX - 11 - pull,
-        tipY: handY - 15 - pull * 0.35,
-        ctrlX: handX - 5 - pull * 0.5,
-        ctrlY: handY - 10,
-      };
+      angle = lerp(-0.85, -2.42, this.chargePower);
+    } else if (this.state === 'CASTING') {
+      angle = lerp(-2.2, -0.35, Math.min(1, this.castT * 2.2));
+    } else if (this.state === 'BITE') {
+      angle = -0.32 + Math.sin(this.time * 28) * 0.08;
+    } else if (this.state === 'REELING') {
+      angle = this.reelHold ? -0.96 : -0.58;
+    } else if (this.state === 'LANDING' || this.state === 'CAUGHT') {
+      angle = -1.28;
     }
 
-    if (this.state === 'LANDING' || this.state === 'CAUGHT') {
-      return {
-        handX, handY,
-        tipX: handX - 8,
-        tipY: handY - 15,
-        ctrlX: handX - 4,
-        ctrlY: handY - 9,
-      };
-    }
-
-    const jigLift = this.jigAnimTimer > 0 ? -5 : 0;
-    const bend = this.rodBend;
-    return {
-      handX, handY,
-      tipX: handX + 20 + bend * 5,
-      tipY: handY - 15 + bend * 12 + jigLift,
-      ctrlX: handX + 13 + bend * 2,
-      ctrlY: handY - 14 + bend * 1.5 + jigLift * 0.5,
-    };
-  }
-
-  launchCast() {
-    const stats = this.getStats();
-    const rod = this.getRodTipPos();
-    const minCastX = this.pierEndX + 22;
-    const maxCastX = this.pierEndX + (this.vw - this.pierEndX - 18) * stats.maxCastFrac;
-    this.castStartX = rod.tipX;
-    this.castStartY = rod.tipY;
-    this.castTargetX = clamp(lerp(minCastX, maxCastX, this.chargePower), minCastX, this.vw - 14);
-    this.castFlightT = 0;
-    this.castFlightDur = lerp(0.32, 0.56, this.chargePower);
-    this.bobberX = this.castStartX;
-    this.bobberY = this.castStartY;
-
-    const waterDepth = this.getWaterDepthAt(this.castTargetX);
-    const sinkRatio = clamp(lerp(0.22, stats.maxSinkFrac, this.chargePower), 0.16, 0.92);
-    this.targetHookDepth = clamp(sinkRatio * (waterDepth - 10), 14, waterDepth - 8);
-    this.hookDepth = 2;
-
-    this.state = 'CASTING';
-    this.stateTimer = 0;
-    sound.playCast();
-    this.updateActionUI();
-  }
-
-  performJig() {
-    this.jigBoost = 1.0;
-    this.jigAnimTimer = 0.26;
-    this.hookDepth = Math.max(10, this.hookDepth - 7);
-    this.bobberDip = -2.2;
-    sound.playJig();
-    this.addRipple(this.bobberX, this.waterY, 6);
-    for (let i = 0; i < 3; i++) {
-      this.bubbles.push({
-        x: this.hookX + rand(-3, 3),
-        y: this.hookY + rand(-2, 2),
-        vy: rand(12, 20),
-        life: rand(0.6, 1.2),
-      });
-    }
-    const radius = this.getStats().attractRadius * 1.45;
-    let best = null;
-    let bestDist = radius;
-    for (const f of this.fishes) {
-      if (f.ai !== 'SWIM' || f.cooldown > 0) continue;
-      const d = Math.hypot(f.x - this.hookX, f.y - this.hookY);
-      if (d < bestDist) {
-        bestDist = d;
-        best = f;
-      }
-    }
-    if (best) best.ai = 'APPROACH';
-  }
-
-  setHook() {
-    if (!this.hookedFish) return;
-    this.state = 'REELING';
-    this.stateTimer = 0;
-    this.reelProgress = 0.36;
-    this.tension = 0.22;
-    this.snapGrace = 0;
-    this.fishThrashing = true;
-    this.thrashTimer = rand(0.75, 1.35);
-    this.hookedFish.ai = 'HOOKED';
-    this.shake(0.18, 2);
-    sound.playHookSet();
-    this.spawnSplash(this.bobberX, this.waterY, 10);
-    this.addFloat(this.bobberX, this.waterY - 12, 'HOOKED!', '#fde047');
-    this.updateActionUI();
-  }
-
-  cancelToIdle(message, color = '#f87171') {
-    if (message) {
-      this.addFloat(this.bobberX || this.pierEndX + 26, this.waterY - 14, message, color);
-    }
-    if (this.hookedFish) {
-      this.hookedFish.ai = 'FLEE';
-      this.hookedFish.cooldown = 4;
-      this.hookedFish = null;
-    }
-    for (const f of this.fishes) {
-      if (f.ai === 'APPROACH' || f.ai === 'NIBBLE') {
-        f.ai = 'SWIM';
-        f.cooldown = 2.0;
-      }
-    }
-    this.state = 'IDLE';
-    this.stateTimer = 0;
-    this.rodBend = 0;
-    this.updateActionUI();
-  }
-
-  completeLanding() {
-    const fish = this.hookedFish;
-    if (!fish) {
-      this.cancelToIdle();
-      return;
-    }
-    const sp = fish.species;
-    const stats = this.getStats();
-    const weight = Number(rand(sp.minWeight, sp.maxWeight).toFixed(1));
-    const sizeBonus = 0.85 + 0.35 * ((weight - sp.minWeight) / Math.max(0.01, sp.maxWeight - sp.minWeight));
-    const coins = Math.max(5, Math.round(sp.value * sizeBonus * stats.coinMult));
-
-    const prev = this.save.log[sp.id];
-    const isNewSpecies = !prev;
-    const isNewRecord = !prev || weight > prev.bestWeight;
-
-    this.save.coins += coins;
-    this.save.totalCatches += 1;
-    this.save.log[sp.id] = {
-      count: (prev ? prev.count : 0) + 1,
-      bestWeight: prev ? Math.max(prev.bestWeight, weight) : weight,
-    };
-    this.persist();
-
-    this.fishes = this.fishes.filter((f) => f !== fish);
-    this.fishes.push(this.spawnFish(true));
-    this.hookedFish = null;
-
-    this.lastCatchInfo = { species: sp, weight, coins, isNewSpecies, isNewRecord };
-    this.state = 'CAUGHT';
-    this.stateTimer = 0;
-    this.rodBend = 0;
-    sound.playCatch(sp.rarity);
-    this.spawnSparkles(this.anglerX + 12, this.anglerY + 2, 16);
-    this.updateHUD();
-    this.showCatchCard(this.lastCatchInfo);
-    this.updateActionUI();
-  }
-
-  dismissCatch() {
-    if (this.state !== 'CAUGHT') return;
-    this.ui.catchOverlay.classList.add('hidden');
-    this.state = 'IDLE';
-    this.stateTimer = 0;
-    this.lastCatchInfo = null;
-    this.updateActionUI();
-  }
-
-  shake(dur, mag) {
-    this.shakeTime = Math.max(this.shakeTime, dur);
-    this.shakeMag = Math.max(this.shakeMag, mag);
-  }
-
-  addRipple(x, y, maxR = 14) {
-    this.ripples.push({ x, y, r: 2, maxR, alpha: 0.9 });
+    const tipBaseX = handX + Math.cos(angle) * rodLen;
+    const tipBaseY = handY + Math.sin(angle) * rodLen;
+    const bend = this.rodFlex * 13;
+    const tipX = tipBaseX + bend * 0.28;
+    const tipY = tipBaseY + bend;
+    const ctrlX = lerp(handX, tipX, 0.56);
+    const ctrlY = lerp(handY, tipY, 0.56) - 4 + bend * 0.22;
+    return { handX, handY, ctrlX, ctrlY, tipX, tipY };
   }
 
   spawnSplash(x, y, count = 8) {
-    this.addRipple(x, y, 10 + count);
+    const map = this.getCurrentMap();
+    const pColor = map.id === 'abyss' ? '#fdba74' : '#e0f7ff';
     for (let i = 0; i < count; i++) {
       this.particles.push({
-        x: x + rand(-3, 3), y,
-        vx: rand(-28, 28), vy: rand(-52, -18),
-        gravity: 135,
-        color: i % 2 === 0 ? '#e0f7ff' : '#7dd3fc',
-        life: rand(0.32, 0.6), maxLife: 0.6, size: 1,
+        x: x + rand(-3, 3),
+        y: y + rand(-1, 1),
+        vx: rand(-26, 26),
+        vy: rand(-52, -18),
+        g: 120,
+        life: rand(0.28, 0.55),
+        size: Math.random() > 0.65 ? 2 : 1,
+        color: Math.random() > 0.35 ? pColor : '#7dd3fc',
       });
     }
   }
 
-  spawnSparkles(x, y, count = 12) {
-    for (let i = 0; i < count; i++) {
-      const ang = rand(0, Math.PI * 2);
-      const spd = rand(12, 42);
-      this.particles.push({
-        x, y,
-        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 12,
-        gravity: 36,
-        color: i % 3 === 0 ? '#fef08a' : i % 3 === 1 ? '#fde047' : '#ffffff',
-        life: rand(0.45, 0.85), maxLife: 0.85, size: 1,
-      });
-    }
+  spawnRipple(x, y) {
+    this.ripples.push({ x, y, r: 2, maxR: rand(12, 20), alpha: 0.9 });
   }
 
-  addFloat(x, y, text, color = '#ffffff') {
-    this.floats.push({ x, y, text, color, life: 1.15, maxLife: 1.15 });
-  }
-
-  getWaveY(x) {
-    return this.waterY + Math.sin(x * 0.12 + this.time * 2.8) * 1.1;
-  }
-
-  loop(ts) {
-    const dt = Math.min(0.05, Math.max(0.001, (ts - this.lastTs) / 1000));
-    this.lastTs = ts;
-    this.update(dt);
-    renderGameWorld(this, this.ctx);
-    requestAnimationFrame((next) => this.loop(next));
+  spawnFloat(x, y, text, color = '#ffffff') {
+    this.floats.push({ x, y, vy: -14, life: 1.05, maxLife: 1.05, text, color });
   }
 
   update(dt) {
     this.time += dt;
-    this.stateTimer += dt;
-    this.timeOfDay = (this.timeOfDay + dt * 0.0042) % 1;
-
-    if (this.pointerHeld) this.holdDuration += dt;
-    if (this.jigAnimTimer > 0) this.jigAnimTimer = Math.max(0, this.jigAnimTimer - dt);
+    this.timeOfDay = (this.timeOfDay + dt / 240) % 1;
+    if (this.castFollowThrough > 0) this.castFollowThrough = Math.max(0, this.castFollowThrough - dt);
     if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
 
+    const map = this.getCurrentMap();
+
+    // Update clouds
     for (const c of this.clouds) {
       c.x += c.speed * dt;
-      if (c.x > this.vw + 24) c.x = -24;
+      if (c.x > this.vw + 24) c.x = -36;
     }
+
+    // Update birds
     for (const b of this.birds) {
-      b.x += b.speed * dt;
-      if (b.x > this.vw + 16) {
-        b.x = -16;
-        b.y = rand(12, Math.max(20, this.waterY - 26));
+      b.x -= b.speed * dt;
+      if (b.x < -14) {
+        b.x = this.vw + rand(12, 50);
+        b.y = rand(10, Math.max(18, this.waterY - 20));
       }
     }
 
-    if (Math.random() < dt * 2.5) {
-      const fromChest = this.vw > 210 && Math.random() < 0.32;
-      const bx = fromChest
-        ? Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.74) + 7
-        : rand(this.pierEndX + 8, this.vw - 8);
-      this.bubbles.push({
-        x: bx, y: this.getSeabedY(bx) - 4,
-        vy: rand(10, 18), life: rand(1.5, 3.4),
-      });
+    // Update biome weather particles
+    for (const wp of this.weatherParticles) {
+      wp.x += wp.vx * dt;
+      wp.y += wp.vy * dt;
+      if (map.weather === 'snow') {
+        wp.x += Math.sin(this.time * 2 + wp.y * 0.1) * 4 * dt;
+        if (wp.y > this.waterY + 2 || wp.x < -4) {
+          wp.x = rand(0, this.vw + 20);
+          wp.y = rand(-8, 0);
+        }
+      } else if (map.weather === 'embers') {
+        wp.x += Math.sin(this.time * 3 + wp.y * 0.12) * 5 * dt;
+        if (wp.y < -4) {
+          wp.x = rand(0, this.vw);
+          wp.y = this.waterY + rand(-2, 4);
+        }
+      }
     }
-    if (this.state === 'REELING' && this.tension > 0.72 && Math.random() < dt * 7) {
-      this.particles.push({
-        x: this.anglerX + rand(6, 14), y: this.anglerY + 6,
-        vx: rand(-18, -6), vy: rand(-26, -12),
-        gravity: 110, color: '#bae6fd', life: 0.35, maxLife: 0.35, size: 1,
+
+    // Ambient underwater bubbles (hot vents in Ember Caldera)
+    if (Math.random() < dt * (map.id === 'abyss' ? 5.2 : 3.2)) {
+      const isHot = map.id === 'abyss' && Math.random() < 0.6;
+      const leftVentX = this.pierEndX + (this.vw - this.pierEndX) * 0.28 + 6;
+      const rightVentX = this.pierEndX + (this.vw - this.pierEndX) * 0.74 + 6;
+      const bx = isHot ? (Math.random() > 0.5 && this.vw > 210 ? rightVentX : leftVentX) + rand(-3, 3) : rand(this.pierEndX + 8, this.vw - 8);
+      this.bubbles.push({
+        x: bx,
+        y: this.getSeabedY(bx) - (isHot ? 10 : 4),
+        vy: rand(12, 22),
+        wobble: rand(0, Math.PI * 2),
+        hot: isHot,
       });
     }
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
       const b = this.bubbles[i];
       b.y -= b.vy * dt;
-      b.x += Math.sin(this.time * 4 + i) * 3 * dt;
-      b.life -= dt;
-      if (b.life <= 0 || b.y <= this.waterY + 1) this.bubbles.splice(i, 1);
-    }
-
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += p.gravity * dt;
-      p.life -= dt;
-      if (p.life <= 0) this.particles.splice(i, 1);
+      b.x += Math.sin(this.time * 4 + b.wobble) * 5 * dt;
+      if (b.y <= this.waterY + 2) this.bubbles.splice(i, 1);
     }
 
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       const r = this.ripples[i];
-      r.r += 24 * dt;
-      r.alpha = Math.max(0, 1 - r.r / r.maxR);
+      r.r += 16 * dt;
+      r.alpha = 1 - r.r / r.maxR;
       if (r.r >= r.maxR) this.ripples.splice(i, 1);
+    }
+
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.vy += p.g * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+      if (p.life <= 0) this.particles.splice(i, 1);
     }
 
     for (let i = this.floats.length - 1; i >= 0; i--) {
       const f = this.floats[i];
-      f.y -= 14 * dt;
+      f.y += f.vy * dt;
       f.life -= dt;
       if (f.life <= 0) this.floats.splice(i, 1);
     }
 
-    this.updateState(dt);
-    this.updateFishes(dt);
-  }
-
-  updateState(dt) {
-    const stats = this.getStats();
-
+    // Fishing state machine
     if (this.state === 'CHARGING') {
-      this.chargePower += this.chargeDir * dt * 1.15;
-      if (this.chargePower >= 1) {
-        this.chargePower = 1;
-        this.chargeDir = -1;
-      } else if (this.chargePower <= 0.14) {
-        this.chargePower = 0.14;
-        this.chargeDir = 1;
-      }
-      this.rodBend = lerp(this.rodBend, 0.2, dt * 8);
+      this.chargePower += this.chargeDir * dt * 1.12;
+      if (this.chargePower >= 1) { this.chargePower = 1; this.chargeDir = -1; }
+      if (this.chargePower <= 0.08) { this.chargePower = 0.08; this.chargeDir = 1; }
+      this.rodFlex = lerp(this.rodFlex, 0.14 * this.chargePower, dt * 8);
     } else if (this.state === 'CASTING') {
-      this.castFlightT += dt / this.castFlightDur;
-      const t = clamp(this.castFlightT, 0, 1);
-      const arcH = lerp(18, 42, this.chargePower);
+      this.castT += dt * 1.65;
+      const t = clamp(this.castT, 0, 1);
+      const arc = Math.sin(t * Math.PI) * (24 + this.chargePower * 22);
       this.bobberX = lerp(this.castStartX, this.castTargetX, t);
-      this.bobberY = lerp(this.castStartY, this.waterY, t) - Math.sin(t * Math.PI) * arcH;
+      this.bobberY = lerp(this.castStartY, this.waterY, t) - arc;
       this.hookX = this.bobberX;
       this.hookY = this.bobberY + 2;
-      this.rodBend = lerp(this.rodBend, 0.15, dt * 10);
+      this.rodFlex = lerp(this.rodFlex, 0.06, dt * 8);
 
       if (t >= 1) {
-        this.bobberY = this.waterY;
         this.state = 'WAITING';
-        this.stateTimer = 0;
-        sound.playSplash(false);
-        this.spawnSplash(this.bobberX, this.waterY, 8);
-        this.updateActionUI();
+        this.bobberY = this.waterY;
+        this.hookX = this.bobberX;
+        this.hookY = this.waterY + 4;
+        sound.playSplash();
+        this.spawnSplash(this.bobberX, this.waterY, 10);
+        this.spawnRipple(this.bobberX, this.waterY);
+        this.updateControlsUI();
       }
     } else if (this.state === 'WAITING') {
-      const waveY = this.getWaveY(this.bobberX);
-      this.bobberDip = lerp(this.bobberDip, 0, dt * 7);
-      this.bobberY = waveY + this.bobberDip;
-
-      if (this.pointerHeld && this.holdDuration > 0.24) {
-        this.bobberX -= 55 * dt;
-        this.hookDepth = Math.max(4, this.hookDepth - 48 * dt);
-        this.rodBend = lerp(this.rodBend, 0.22, dt * 8);
-        sound.playReelTick(0.15);
-        if (this.bobberX <= this.pierEndX + 12) {
-          this.cancelToIdle();
-          return;
-        }
-      } else {
-        const maxHere = Math.max(12, this.getWaterDepthAt(this.bobberX) - 8);
-        const goal = Math.min(this.targetHookDepth, maxHere);
-        this.hookDepth = lerp(this.hookDepth, goal, dt * 1.4);
-        this.rodBend = lerp(this.rodBend, 0.08, dt * 6);
-      }
-
-      this.jigBoost = Math.max(0, this.jigBoost - dt * 1.2);
-      this.hookX = this.bobberX + Math.sin(this.time * 2.4) * 2;
-      this.hookY = this.waterY + this.hookDepth;
-      this.updateDepthBadge();
+      this.bobberY = this.waterY + Math.sin(this.time * 4.2) * 1.1;
+      this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, dt * 4);
+      this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), dt * 1.85);
+      this.rodFlex = lerp(this.rodFlex, 0.04, dt * 6);
     } else if (this.state === 'BITE') {
       this.biteTimer -= dt;
-      this.bobberDip = lerp(this.bobberDip, 5, dt * 14);
-      this.bobberY = this.getWaveY(this.bobberX) + this.bobberDip;
-      this.rodBend = lerp(this.rodBend, 0.45, dt * 12);
-
-      if (this.hookedFish) {
-        this.hookX = this.hookedFish.x;
-        this.hookY = this.hookedFish.y;
+      this.bobberY = this.waterY + 2.5 + Math.sin(this.time * 32) * 1.6;
+      this.rodFlex = lerp(this.rodFlex, 0.52, dt * 14);
+      if (this.activeFish) {
+        this.hookX = this.activeFish.x + this.activeFish.dir * 4;
+        this.hookY = this.activeFish.y;
       }
-
+      if (Math.random() < dt * 9) this.spawnRipple(this.bobberX, this.waterY);
       if (this.biteTimer <= 0) {
-        sound.playMiss();
-        this.cancelToIdle('TOO SLOW!', '#fbbf24');
+        sound.playSnap();
+        this.resetToIdle('GOT AWAY!');
       }
     } else if (this.state === 'REELING') {
-      const fish = this.hookedFish;
-      if (!fish) {
-        this.cancelToIdle();
-        return;
-      }
-      const sp = fish.species;
-
-      this.thrashTimer -= dt;
-      if (this.thrashTimer <= 0) {
-        this.fishThrashing = !this.fishThrashing;
-        this.thrashTimer = this.fishThrashing
-          ? rand(0.75, 1.45) * (0.85 + sp.thrashRate * 0.6)
-          : rand(1.05, 1.85) * (1.25 - sp.thrashRate * 0.45);
-        if (this.fishThrashing) {
-          this.spawnSplash(fish.x, Math.min(fish.y, this.waterY + 4), 5);
-        }
-      }
-
-      const diffScale = clamp(sp.strength / (0.88 + (this.save.upgrades.rod - 1) * 0.22), 0.55, 1.75);
-      if (this.pointerHeld) {
-        const pullSpeed = stats.reelPower / Math.sqrt(diffScale);
-        const pullMult = this.fishThrashing ? 0.32 : 1.05;
-        this.reelProgress += pullSpeed * pullMult * dt;
-
-        const tensionGain = (this.fishThrashing ? 0.68 * diffScale : 0.16 * diffScale) * stats.tensionResist;
-        this.tension += tensionGain * dt;
-        sound.playReelTick(this.tension);
-      } else {
-        this.tension -= 0.62 * dt;
-        const dragBack = this.fishThrashing ? 0.16 * diffScale : 0.04;
-        this.reelProgress -= dragBack * dt;
-      }
-
-      this.tension = clamp(this.tension, 0, 1);
-      this.reelProgress = clamp(this.reelProgress, 0, 1);
-
-      if (this.tension > 0.78) sound.playTensionWarn();
-      if (this.tension >= 0.99) {
-        this.snapGrace += dt;
-        if (this.snapGrace >= 0.30) {
-          sound.playSnap();
-          this.shake(0.28, 3);
-          this.cancelToIdle('LINE SNAPPED!', '#f87171');
-          return;
-        }
-      } else {
-        this.snapGrace = Math.max(0, this.snapGrace - dt * 2);
-      }
-
-      if (this.reelProgress <= 0.005) {
-        sound.playMiss();
-        this.cancelToIdle('GOT AWAY!', '#fb923c');
-        return;
-      }
-
-      if (this.reelProgress >= 0.995) {
-        this.state = 'LANDING';
-        this.stateTimer = 0;
-        this.landStartX = fish.x;
-        this.landStartY = fish.y;
-        this.landT = 0;
-        sound.playSplash(true);
-        this.spawnSplash(fish.x, this.waterY, 12);
-        this.updateActionUI();
-        return;
-      }
-
-      const farX = Math.min(this.vw - 18, Math.max(this.castTargetX + 12, this.pierEndX + 70));
-      const nearX = this.pierEndX + 14;
-      const targetX = lerp(farX, nearX, this.reelProgress);
-      const maxD = this.getWaterDepthAt(targetX) - 10;
-      const targetY = this.waterY + lerp(clamp(sp.maxDepth * maxD, 18, maxD), 8, this.reelProgress);
-      const thrashWiggleX = this.fishThrashing ? Math.sin(this.time * 28) * 5 : Math.sin(this.time * 7) * 1.5;
-      const thrashWiggleY = this.fishThrashing ? Math.cos(this.time * 24) * 3 : 0;
-
-      fish.x = lerp(fish.x, targetX + thrashWiggleX, dt * 6);
-      fish.y = clamp(lerp(fish.y, targetY + thrashWiggleY, dt * 6), this.waterY + 4, this.getSeabedY(fish.x) - 6);
-      fish.dir = this.fishThrashing ? 1 : -1;
-
-      this.hookX = fish.x + (fish.dir === 1 ? 5 : -5);
-      this.hookY = fish.y;
-      this.bobberX = lerp(this.pierEndX + 10, this.hookX, 0.72);
-      this.bobberY = this.getWaveY(this.bobberX) + 2;
-      this.rodBend = lerp(this.rodBend, 0.35 + this.tension * 0.95, dt * 12);
-
-      if (this.fishThrashing && Math.random() < dt * 8) {
-        this.bubbles.push({
-          x: fish.x + rand(-5, 5), y: fish.y + rand(-2, 2),
-          vy: rand(14, 24), life: rand(0.4, 0.9),
-        });
-      }
-
-      this.updateReelHUD();
+      this.updateReeling(dt);
     } else if (this.state === 'LANDING') {
-      this.landT += dt / 0.45;
-      const t = clamp(this.landT, 0, 1);
-      const endX = this.anglerX + 12;
-      const endY = this.anglerY + 2;
-      if (this.hookedFish) {
-        this.hookedFish.x = lerp(this.landStartX, endX, t);
-        this.hookedFish.y = lerp(this.landStartY, endY, t) - Math.sin(t * Math.PI) * 34;
-        this.hookX = this.hookedFish.x;
-        this.hookY = this.hookedFish.y;
+      this.landingT += dt * 1.8;
+      const t = clamp(this.landingT, 0, 1);
+      const destX = this.anglerX + 10;
+      const destY = this.pierY - 12;
+      const arc = Math.sin(t * Math.PI) * 32;
+      this.hookX = lerp(this.landingStartX, destX, t);
+      this.hookY = lerp(this.landingStartY, destY, t) - arc;
+      if (this.activeFish) {
+        this.activeFish.x = this.hookX;
+        this.activeFish.y = this.hookY;
       }
-      this.rodBend = lerp(this.rodBend, 0.1, dt * 8);
-      if (t >= 1) this.completeLanding();
+      this.rodFlex = lerp(this.rodFlex, 0.25 * (1 - t), dt * 10);
+      if (t >= 1) this.completeCatch();
     } else {
-      this.rodBend = lerp(this.rodBend, 0, dt * 6);
+      this.rodFlex = lerp(this.rodFlex, 0, dt * 6);
+    }
+
+    this.updateFishAI(dt);
+
+    // Update map + zone badge
+    const mapLabel = map.name.toUpperCase();
+    const showDepth = this.state === 'WAITING' || this.state === 'BITE' || this.state === 'REELING';
+    const band = showDepth ? this.getDepthBand(this.hookY).name : 'PIER';
+    this.el.depthBadge.textContent = `${mapLabel} \u2022 ${band}`;
+
+    if (Math.floor(this.time * 2) !== Math.floor((this.time - dt) * 2)) {
+      this.updateHUD();
     }
   }
 
-  updateFishes(dt) {
-    const stats = this.getStats();
-    const minX = this.pierEndX + 6;
-    const maxX = this.vw - 8;
+  updateReeling(dt) {
+    const fish = this.activeFish;
+    if (!fish) return this.resetToIdle();
 
-    const desired = this.isPortrait ? 9 : 12;
-    while (this.fishes.length < desired) {
-      this.fishes.push(this.spawnFish(true));
+    const stats = this.getStats();
+    this.fishFightTimer -= dt;
+    if (this.fishFightTimer <= 0) {
+      this.fishThrashing = !this.fishThrashing;
+      const strength = fish.species.strength;
+      this.fishFightTimer = this.fishThrashing
+        ? rand(0.5, 0.8 + strength * 0.22)
+        : rand(0.75, 1.45 - Math.min(0.45, strength * 0.14));
+      this.updateControlsUI();
     }
 
-    const anyoneApproaching = this.fishes.some((f) => f.ai === 'APPROACH' || f.ai === 'NIBBLE');
+    const strength = fish.species.strength;
+    if (this.reelHold) {
+      const gain = (stats.reelSpeed / (0.68 + strength * 0.28)) * (this.fishThrashing ? 0.55 : 1.0);
+      this.progress += gain * dt;
+      const strain = ((this.fishThrashing ? 0.62 : 0.18) * (0.65 + strength * 0.36)) / stats.lineStrength;
+      this.tension += strain * dt;
 
-    for (let i = this.fishes.length - 1; i >= 0; i--) {
-      const f = this.fishes[i];
-      if (f.cooldown > 0) f.cooldown -= dt;
+      this.reelTickAccum += dt;
+      if (this.reelTickAccum > 0.12) {
+        this.reelTickAccum = 0;
+        sound.playReelTick(this.tension);
+      }
+    } else {
+      const slip = (this.fishThrashing ? 0.08 : 0.025) * strength;
+      this.progress = Math.max(0.02, this.progress - slip * dt);
+      const cool = stats.tensionDecay * (this.fishThrashing ? 0.72 : 1.15);
+      this.tension = Math.max(0, this.tension - cool * dt);
+    }
+
+    const targetX = lerp(this.castTargetX, this.pierEndX + 12, clamp(this.progress, 0, 1));
+    const targetY = lerp(this.targetDepthY, this.waterY + 8, clamp(this.progress, 0, 1));
+    const thrashX = this.fishThrashing ? Math.sin(this.time * 24) * 5 : Math.sin(this.time * 8) * 1.5;
+    const thrashY = this.fishThrashing ? Math.cos(this.time * 20) * 3.5 : 0;
+    fish.x = clamp(lerp(fish.x, targetX + thrashX, dt * 4.2), this.pierEndX + 6, this.vw - 8);
+    fish.y = clamp(lerp(fish.y, targetY + thrashY, dt * 4.2), this.waterY + 6, this.getSeabedY(fish.x) - 6);
+    fish.dir = this.fishThrashing ? 1 : -1;
+
+    this.hookX = fish.x;
+    this.hookY = fish.y;
+    this.bobberX = lerp(this.bobberX, fish.x, dt * 5);
+    this.bobberY = this.waterY + 1 + (this.fishThrashing ? Math.sin(this.time * 28) * 2 : 0);
+    this.rodFlex = lerp(this.rodFlex, 0.35 + this.tension * 0.75, dt * 10);
+
+    if (this.fishThrashing && Math.random() < dt * 8) {
+      this.spawnSplash(this.bobberX, this.waterY, 3);
+      this.spawnRipple(this.bobberX, this.waterY);
+    }
+
+    this.el.tensionFill.style.width = `${Math.round(clamp(this.tension, 0, 1) * 100)}%`;
+    this.el.progressFill.style.width = `${Math.round(clamp(this.progress, 0, 1) * 100)}%`;
+    this.el.tensionFill.classList.toggle('danger', this.tension > 0.78);
+
+    if (this.tension >= 1) {
+      sound.playSnap();
+      this.shakeTime = 0.25;
+      this.shakeMag = 3;
+      this.resetToIdle('LINE SNAPPED!');
+    } else if (this.progress >= 1) {
+      this.startLanding();
+    }
+  }
+
+  updateFishAI(dt) {
+    const stats = this.getStats();
+    let approachingCount = this.fishes.filter((f) => f.ai === 'APPROACH').length;
+
+    for (const f of this.fishes) {
       if (f.ai === 'HOOKED') continue;
 
       if (f.ai === 'FLEE') {
-        f.x += f.dir * f.speed * 2.8 * dt;
-        if (f.x < -30 || f.x > this.vw + 30) this.fishes.splice(i, 1);
-        continue;
-      }
-
-      if (f.ai === 'SWIM') {
-        f.x += f.dir * f.speed * dt;
-        const depthHere = Math.max(28, this.getWaterDepthAt(clamp(f.x, minX, maxX)) - 12);
-        const goalY = this.waterY + 10 + f.normDepth * depthHere;
-        f.baseY = lerp(f.baseY, goalY, dt * 1.5);
-        f.y = clamp(
-          f.baseY + Math.sin(this.time * 2.2 + f.phase) * 2.5,
-          this.waterY + 8,
-          this.getSeabedY(clamp(f.x, minX, maxX)) - 7
-        );
-
-        if (f.x < minX - 24 && f.dir === -1) {
-          f.dir = 1;
-        } else if (f.x > maxX + 26 && f.dir === 1) {
-          this.fishes.splice(i, 1);
-          continue;
-        } else if (Math.random() < dt * 0.08 && f.x > minX + 10 && f.x < maxX - 10) {
-          f.dir *= -1;
-        }
-
-        if (
-          this.state === 'WAITING' &&
-          !anyoneApproaching &&
-          !(this.pointerHeld && this.holdDuration > 0.24) &&
-          f.cooldown <= 0
-        ) {
-          const detectR = stats.attractRadius * (1 + this.jigBoost * 0.45);
-          const dist = Math.hypot(f.x - this.hookX, f.y - this.hookY);
-          if (dist < detectR && Math.random() < dt * (2.6 + this.save.upgrades.lure * 0.65)) {
-            f.ai = 'APPROACH';
-            f.nibbleCount = Math.random() < 0.55 ? 1 : 2;
-            f.nibbleTimer = 0;
-          }
-        }
+        f.fleeTimer -= dt;
+        f.x += f.dir * f.speed * 2.4 * dt;
+        if (f.fleeTimer <= 0) f.ai = 'CRUISE';
       } else if (f.ai === 'APPROACH') {
-        if (this.state !== 'WAITING' || (this.pointerHeld && this.holdDuration > 0.24)) {
-          f.ai = 'SWIM';
+        if (this.state !== 'WAITING') {
+          f.ai = 'CRUISE';
           continue;
         }
         const dx = this.hookX - f.x;
         const dy = this.hookY - f.y;
         const dist = Math.hypot(dx, dy);
         f.dir = dx >= 0 ? 1 : -1;
-        if (dist > 6) {
-          const spd = f.speed * 1.45;
-          f.x += (dx / dist) * spd * dt;
-          f.y += (dy / dist) * spd * dt;
+        if (dist > 4) {
+          f.x += (dx / dist) * f.speed * 1.45 * dt;
+          f.y += (dy / dist) * f.speed * 1.45 * dt;
         } else {
-          f.ai = 'NIBBLE';
-          f.nibbleTimer = rand(0.35, 0.7);
-        }
-      } else if (f.ai === 'NIBBLE') {
-        if (this.state !== 'WAITING') {
-          f.ai = 'SWIM';
+          this.activeFish = f;
+          this.state = 'BITE';
+          this.biteTimer = clamp(1.45 - f.species.strength * 0.08 + stats.biteBonus, 0.9, 2.0);
+          sound.playBite();
+          this.spawnSplash(this.bobberX, this.waterY, 8);
+          this.spawnRipple(this.bobberX, this.waterY);
+          this.updateControlsUI();
           continue;
         }
-        f.nibbleTimer -= dt;
-        f.x = lerp(f.x, this.hookX - f.dir * 5, dt * 6);
-        f.y = lerp(f.y, this.hookY, dt * 6);
+      } else {
+        f.turnTimer -= dt;
+        f.x += f.dir * f.speed * dt;
+        f.y = f.homeY + Math.sin(this.time * 2.2 + f.phase) * 2.4;
 
-        if (f.nibbleTimer <= 0) {
-          if (f.nibbleCount > 0) {
-            f.nibbleCount--;
-            f.nibbleTimer = rand(0.45, 0.85);
-            this.bobberDip = 2.6;
-            sound.playNibble();
-            this.addRipple(this.bobberX, this.waterY, 10);
-          } else {
-            this.hookedFish = f;
-            f.ai = 'HOOKED';
-            this.state = 'BITE';
-            this.stateTimer = 0;
-            this.biteTimer = stats.biteWindow;
-            this.bobberDip = 5.5;
-            sound.playBite();
-            this.shake(0.16, 1.5);
-            this.spawnSplash(this.bobberX, this.waterY, 9);
-            this.updateActionUI();
+        const minX = this.pierEndX + 10;
+        const maxX = this.vw - 10;
+        if (f.x < minX) { f.x = minX; f.dir = 1; }
+        if (f.x > maxX) { f.x = maxX; f.dir = -1; }
+        if (f.turnTimer <= 0) {
+          f.turnTimer = rand(3, 8);
+          if (Math.random() < 0.35) f.dir *= -1;
+        }
+
+        if (this.state === 'WAITING' && approachingCount === 0 && Math.abs(this.hookY - this.waterY) > 7) {
+          const dist = Math.hypot(this.hookX - f.x, this.hookY - f.y);
+          if (dist < stats.attractRadius && Math.random() < dt * 1.45 * stats.lureLuck) {
+            f.ai = 'APPROACH';
+            approachingCount = 1;
           }
         }
       }
 
-      if (f.species.id === 'goldenkoi' && Math.random() < dt * 4) {
-        this.particles.push({
-          x: f.x + rand(-6, 6), y: f.y + rand(-3, 3),
-          vx: rand(-5, 5), vy: rand(-10, -3),
-          gravity: 0, color: '#fef08a', life: 0.45, maxLife: 0.45, size: 1,
-        });
-      }
+      const maxY = this.getSeabedY(f.x) - 6;
+      f.y = clamp(f.y, this.waterY + 7, Math.max(this.waterY + 8, maxY));
     }
   }
 
-  updateHUD() {
-    this.ui.coins.textContent = this.save.coins;
-    this.ui.catches.textContent = `${Object.keys(this.save.log).length}/${FISH_SPECIES.length}`;
-    this.ui.btnMute.textContent = this.save.muted ? 'SFX OFF' : 'SFX ON';
-    this.ui.btnMute.classList.toggle('is-muted', this.save.muted);
+  render() {
+    renderGameWorld(this, this.ctx);
   }
 
-  updateDepthBadge() {
-    if (this.state !== 'WAITING' && this.state !== 'BITE' && this.state !== 'REELING') {
-      this.ui.depthBadge.classList.add('hidden');
-      return;
-    }
-    const maxD = this.getWaterDepthAt(this.bobberX || this.pierEndX + 30);
-    const ratio = clamp(this.hookDepth / Math.max(1, maxD), 0, 1);
-    const zone = ratio < 0.36 ? 'SHALLOWS' : ratio < 0.68 ? 'MID-WATER' : 'DEEP FLOOR';
-    const meters = (ratio * 24 + 1).toFixed(1);
-    this.ui.depthBadge.textContent = `${zone} · ${meters}m`;
-    this.ui.depthBadge.classList.remove('hidden');
-  }
-
-  updateReelHUD() {
-    if (this.state !== 'REELING') return;
-    this.ui.tensionFill.style.width = `${Math.round(this.tension * 100)}%`;
-    this.ui.tensionFill.className =
-      'bar-fill ' + (this.tension > 0.76 ? 'danger' : this.tension > 0.5 ? 'warn' : 'safe');
-
-    const pct = Math.round(this.reelProgress * 100);
-    this.ui.progressFill.style.width = `${pct}%`;
-    this.ui.progressIcon.style.left = `${pct}%`;
-
-    if (this.fishThrashing) {
-      this.ui.reelStatus.textContent = this.tension > 0.65 ? 'EASE OFF! THRASHING!' : 'FISH THRASHING!';
-      this.ui.reelStatus.className = 'reel-status thrashing';
-    } else {
-      this.ui.reelStatus.textContent = 'HOLD TO REEL IN!';
-      this.ui.reelStatus.className = 'reel-status calm';
-    }
-  }
-
-  updateActionUI() {
-    const btn = this.ui.actionBtn;
-    btn.classList.remove('state-bite', 'state-reel', 'state-charge');
-    this.ui.reelHud.classList.toggle('hidden', this.state !== 'REELING');
-    this.updateDepthBadge();
-
-    switch (this.state) {
-      case 'IDLE':
-        this.ui.actionLabel.textContent = 'HOLD TO CAST';
-        this.ui.actionSub.textContent = 'Hold anywhere or Space';
-        break;
-      case 'CHARGING':
-        btn.classList.add('state-charge');
-        this.ui.actionLabel.textContent = 'RELEASE TO CAST!';
-        this.ui.actionSub.textContent = 'Farther cast sinks deeper';
-        break;
-      case 'CASTING':
-        this.ui.actionLabel.textContent = 'CASTING...';
-        this.ui.actionSub.textContent = 'Watch the bobber';
-        break;
-      case 'WAITING':
-        this.ui.actionLabel.textContent = 'TAP: JIG · HOLD: REEL IN';
-        this.ui.actionSub.textContent = 'Wait for a bite!';
-        break;
-      case 'BITE':
-        btn.classList.add('state-bite');
-        this.ui.actionLabel.textContent = 'HOOK IT NOW!';
-        this.ui.actionSub.textContent = 'TAP QUICKLY!';
-        break;
-      case 'REELING':
-        btn.classList.add('state-reel');
-        this.ui.actionLabel.textContent = 'HOLD TO REEL';
-        this.ui.actionSub.textContent = 'Release when fish thrashes';
-        this.updateReelHUD();
-        break;
-      case 'LANDING':
-        this.ui.actionLabel.textContent = 'LANDING CATCH!';
-        this.ui.actionSub.textContent = 'Nice work!';
-        break;
-      case 'CAUGHT':
-        this.ui.actionLabel.textContent = 'CONTINUE';
-        this.ui.actionSub.textContent = 'Tap to fish again';
-        break;
-    }
-  }
-
-  showCatchCard(info) {
-    const { species, weight, coins, isNewSpecies, isNewRecord } = info;
-    const rarity = RARITY_META[species.rarity];
-    const spriteCanvas = this.sprites.fish[species.id].right[0];
-
-    this.ui.catchImg.src = spriteToDataURL(spriteCanvas, 5);
-    this.ui.catchImg.alt = species.name;
-    this.ui.catchName.textContent = species.name;
-    this.ui.catchRarity.textContent = rarity.label;
-    this.ui.catchRarity.style.color = rarity.color;
-    this.ui.catchRarity.style.background = rarity.bg;
-    this.ui.catchWeight.textContent = `${weight.toFixed(1)} lb`;
-    this.ui.catchValue.textContent = `+${coins} G`;
-    this.ui.catchDesc.textContent = species.desc;
-
-    if (isNewSpecies) {
-      this.ui.catchStamp.textContent = 'NEW SPECIES!';
-      this.ui.catchStamp.classList.remove('hidden');
-    } else if (isNewRecord) {
-      this.ui.catchStamp.textContent = 'NEW RECORD!';
-      this.ui.catchStamp.classList.remove('hidden');
-    } else {
-      this.ui.catchStamp.classList.add('hidden');
-    }
-
-    this.ui.catchOverlay.classList.remove('hidden');
-  }
-
-  openShop() {
-    this.closeModals();
-    this.renderShop();
-    this.ui.shopModal.classList.remove('hidden');
-  }
-
-  renderShop() {
-    this.ui.shopCoins.textContent = `${this.save.coins} G`;
-    this.ui.shopList.innerHTML = '';
-
-    for (const up of UPGRADES) {
-      const lv = this.save.upgrades[up.id] || 1;
-      const isMax = lv >= up.maxLevel;
-      const nextCost = isMax ? 0 : up.costs[lv];
-      const canAfford = !isMax && this.save.coins >= nextCost;
-
-      const row = document.createElement('div');
-      row.className = 'shop-item';
-      row.innerHTML = `
-        <div class="shop-info">
-          <div class="shop-title">${up.name} <span class="shop-lv">LV ${lv}/${up.maxLevel}</span></div>
-          <div class="shop-tier">${up.tiers[lv - 1]}${!isMax ? ` → ${up.tiers[lv]}` : ' (MAX)'}</div>
-          <div class="shop-desc">${up.desc}</div>
-        </div>
-        <button class="pixel-btn shop-buy ${canAfford ? 'can-buy' : ''}" ${!canAfford ? 'disabled' : ''}>
-          ${isMax ? 'MAXED' : `${nextCost} G`}
-        </button>
-      `;
-
-      const buyBtn = row.querySelector('.shop-buy');
-      buyBtn.addEventListener('click', () => {
-        if (isMax || this.save.coins < nextCost) return;
-        this.save.coins -= nextCost;
-        this.save.upgrades[up.id] = lv + 1;
-        this.persist();
-        sound.playBuy();
-        this.updateHUD();
-        this.renderShop();
-      });
-
-      this.ui.shopList.appendChild(row);
-    }
-  }
-
-  openLog() {
-    this.closeModals();
-    this.renderLog();
-    this.ui.logModal.classList.remove('hidden');
-  }
-
-  renderLog() {
-    const discovered = Object.keys(this.save.log).length;
-    this.ui.logSummary.textContent = `${discovered} / ${FISH_SPECIES.length} Species · ${this.save.totalCatches} Caught`;
-    this.ui.logGrid.innerHTML = '';
-
-    for (const sp of FISH_SPECIES) {
-      const entry = this.save.log[sp.id];
-      const rarity = RARITY_META[sp.rarity];
-      const spr = entry ? this.sprites.fish[sp.id].right[0] : this.sprites.fish[sp.id].logSil;
-
-      const card = document.createElement('div');
-      card.className = `log-card ${entry ? 'discovered' : 'locked'}`;
-      card.innerHTML = `
-        <div class="log-art"><img src="${spriteToDataURL(spr, 3)}" alt="${entry ? sp.name : 'Unknown'}" /></div>
-        <div class="log-name">${entry ? sp.name : '???'}</div>
-        <div class="log-rarity" style="color:${rarity.color}">${rarity.label}</div>
-        <div class="log-meta">${entry ? `Best ${entry.bestWeight.toFixed(1)} lb · ×${entry.count}` : sp.zone}</div>
-      `;
-      this.ui.logGrid.appendChild(card);
-    }
-  }
-
-  closeModals() {
-    this.ui.shopModal.classList.add('hidden');
-    this.ui.logModal.classList.add('hidden');
+  loop(now) {
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.lastFrame) / 1000));
+    this.lastFrame = now;
+    this.update(dt);
+    this.render();
+    requestAnimationFrame((t) => this.loop(t));
   }
 }
 
-const game = new PierlineGame();
-window.__PIERLINE__ = game;
+new PierlineGame();

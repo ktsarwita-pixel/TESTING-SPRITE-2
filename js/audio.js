@@ -125,7 +125,7 @@ class SoundEngine {
 
   playCatch(rarity = 'common') {
     const fanfare =
-      rarity === 'legendary' || rarity === 'epic'
+      rarity === 'mythic' || rarity === 'legendary' || rarity === 'rare'
         ? [523, 659, 784, 1046, 1318]
         : [523, 659, 784, 1046];
     fanfare.forEach((f, idx) => {

@@ -597,3 +597,95 @@ body {
     gap: 4px;
   }
 }
+
+.pixel-btn.accent-cyan {
+  background: #155e75;
+  color: #ecfeff;
+  border-color: #38bdf8;
+}
+
+.map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #1a2d47;
+  border: 2px solid #415c7f;
+}
+
+.map-card.active-map {
+  border-color: #38bdf8;
+  background: #183452;
+}
+
+.map-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-swatch {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #0b1424;
+  flex-shrink: 0;
+}
+
+.map-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.map-tag {
+  font-size: 10px;
+  font-weight: 800;
+  color: #93c5fd;
+  letter-spacing: 0.5px;
+}
+
+.map-desc {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+.map-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.map-fish-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.map-fish-strip img {
+  width: 24px;
+  height: 16px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.map-fish-strip img.sil {
+  filter: brightness(0) opacity(0.5);
+}
+
+.log-maps {
+  font-size: 9px;
+  color: #7dd3fc;
+  letter-spacing: 0.4px;
+}

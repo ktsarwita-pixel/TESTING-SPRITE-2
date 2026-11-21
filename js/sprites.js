@@ -1,6 +1,7 @@
 // Handcrafted 16-bit pixel-art angler poses (strictly grounded on bottom row!), props, and compiler.
 import { PALETTE } from './palette.js';
 import { FISH_SPRITES } from './fishSprites.js';
+import { MAP_PROP_SPRITES } from './mapProps.js';
 
 export { PALETTE, FISH_SPRITES };
 
@@ -463,7 +464,7 @@ export const ANGLER_SPRITES = {
   },
 };
 
-export const PROP_SPRITES = {
+const BASE_PROP_SPRITES = {
   bobber0: normalizeRows([
     '...k...',
     '...k...',
@@ -697,6 +698,8 @@ export const PROP_SPRITES = {
     '..4.4...',
   ]),
 };
+
+export const PROP_SPRITES = { ...BASE_PROP_SPRITES, ...MAP_PROP_SPRITES };
 
 function makeCanvasFromRows(rows, options = {}) {
   const { flipX = false, silhouetteColor = null } = options;
