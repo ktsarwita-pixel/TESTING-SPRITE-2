@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#091529" />
+  <title>PIERLINE — 2D Pixel Fishing</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-shell">
+    <canvas id="game-canvas" aria-label="Pierline 2D pixel fishing game"></canvas>
+
+    <!-- Top HUD -->
+    <header id="top-hud">
+      <div class="hud-group">
+        <div class="hud-pill" title="Coins">
+          <span class="coin-dot" aria-hidden="true"></span>
+          <span id="hud-coins">0</span> G
+        </div>
+        <div class="hud-pill" title="Species Discovered">
+          <span class="fish-dot" aria-hidden="true"></span>
+          <span id="hud-catches">0/12</span>
+        </div>
+      </div>
+
+      <div class="hud-group">
+        <button id="btn-shop" class="pixel-btn" type="button">SHOP</button>
+        <button id="btn-log" class="pixel-btn" type="button">LOG</button>
+        <button id="btn-mute" class="pixel-btn" type="button">SFX ON</button>
+      </div>
+    </header>
+
+    <div id="hud-depth" class="hidden">SHALLOWS · 2.0m</div>
+
+    <div id="hint-banner">
+      HOLD TO CAST · TAP ON "!" TO HOOK · REEL WHEN CALM
+    </div>
+
+    <!-- Bottom Mobile-Friendly Action & Reeling HUD -->
+    <div id="bottom-dock">
+      <div id="reel-hud" class="hidden">
+        <div id="reel-status" class="reel-status calm">HOLD TO REEL IN!</div>
+        <div class="bar-row">
+          <span>TENSION</span>
+          <div class="bar-track">
+            <div id="tension-fill" class="bar-fill safe"></div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <span>CATCH</span>
+          <div class="bar-track">
+            <div id="progress-fill" class="bar-fill progress"></div>
+            <div id="progress-icon"></div>
+          </div>
+        </div>
+      </div>
+
+      <button id="action-btn" type="button">
+        <span id="action-label">HOLD TO CAST</span>
+        <span id="action-sub">Hold anywhere or Space</span>
+      </button>
+    </div>
+
+    <!-- Catch Reveal Card -->
+    <div id="catch-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="catch-name">
+      <div class="pixel-card">
+        <div id="catch-stamp" class="catch-stamp hidden">NEW SPECIES!</div>
+        <div class="catch-art-box">
+          <img id="catch-img" src="" alt="" />
+        </div>
+        <div id="catch-name" class="catch-title">Silver Minnow</div>
+        <div id="catch-rarity" class="rarity-badge">COMMON</div>
+        <div class="catch-stats">
+          <div class="stat-box">
+            <div class="stat-label">WEIGHT</div>
+            <div id="catch-weight" class="stat-val">0.3 lb</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">REWARD</div>
+            <div id="catch-value" class="stat-val gold">+15 G</div>
+          </div>
+        </div>
+        <p id="catch-desc" class="catch-desc"></p>
+        <button id="catch-continue" class="pixel-btn continue-btn" type="button">KEEP FISHING</button>
+      </div>
+    </div>
+
+    <!-- Tackle Shop Modal -->
+    <div id="shop-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="shop-title">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <div>
+            <div id="shop-title" class="modal-title">PIER TACKLE SHOP</div>
+            <div id="shop-coins" class="modal-sub">0 G</div>
+          </div>
+          <button class="pixel-btn" type="button" data-close-modal>CLOSE</button>
+        </div>
+        <div class="modal-body">
+          <div id="shop-list" class="shop-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fish Log / Bestiary Modal -->
+    <div id="log-modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <div>
+            <div id="log-title" class="modal-title">FISH LOG</div>
+            <div id="log-summary" class="modal-sub">0 / 12 Species</div>
+          </div>
+          <button class="pixel-btn" type="button" data-close-modal>CLOSE</button>
+        </div>
+        <div class="modal-body">
+          <div id="log-grid" class="log-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/game.js"></script>
+</body>
+</html>
