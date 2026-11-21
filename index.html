@@ -13,45 +13,52 @@
   <div id="game-shell">
     <canvas id="game-canvas" aria-label="Pierline pixel art fishing game"></canvas>
 
-    <!-- Top HUD -->
-    <header id="hud-top">
-      <div class="hud-group hud-stats">
-        <div class="pixel-pill" title="Coins">
-          <span class="coin-dot"></span>
-          <span id="hud-coins">0</span>
+    <!-- Non-overlapping Top HUD Stack -->
+    <div id="hud-top-stack">
+      <header id="hud-top">
+        <div class="hud-group hud-stats">
+          <div class="pixel-pill" title="Coins">
+            <span class="coin-dot"></span>
+            <span id="hud-coins">0</span>
+          </div>
+          <div class="pixel-pill" title="Fish caught">
+            <span class="pill-label">FISH</span>
+            <span id="hud-caught">0</span>
+          </div>
+          <div class="pixel-pill hide-sm" title="Time of day">
+            <span id="hud-time">DAY</span>
+          </div>
         </div>
-        <div class="pixel-pill" title="Fish caught">
-          <span class="pill-label">CATCH</span>
-          <span id="hud-caught">0</span>
+
+        <div class="hud-group hud-actions">
+          <button id="btn-maps" class="pixel-btn accent-cyan" type="button" aria-label="Open Fishing Maps">MAP</button>
+          <button id="btn-shop" class="pixel-btn accent-gold" type="button" aria-label="Open Tackle Shop">SHOP</button>
+          <button id="btn-log" class="pixel-btn" type="button" aria-label="Open Fish Log">LOG</button>
+          <button id="btn-admin" class="pixel-btn accent-purple" type="button" aria-label="Open Admin Test Panel" title="Admin Test Panel">DEV</button>
+          <button id="btn-sound" class="pixel-btn icon-btn" type="button" aria-label="Toggle Sound" title="Toggle Sound">SFX</button>
         </div>
-        <div class="pixel-pill hide-xs" title="Time of day">
-          <span id="hud-time">DAY</span>
-        </div>
+      </header>
+
+      <div id="hud-subbar">
+        <div id="depth-badge" class="pixel-pill small-pill">SUNLIT PIER &bull; PIER</div>
+        <div id="hint-banner" role="status" aria-live="polite">HOLD &amp; RELEASE TO CAST</div>
       </div>
-
-      <div class="hud-group hud-actions">
-        <button id="btn-maps" class="pixel-btn accent-cyan" type="button" aria-label="Open Fishing Maps">MAP</button>
-        <button id="btn-shop" class="pixel-btn accent-gold" type="button" aria-label="Open Tackle Shop">SHOP</button>
-        <button id="btn-log" class="pixel-btn" type="button" aria-label="Open Fish Log">LOG</button>
-        <button id="btn-admin" class="pixel-btn accent-purple" type="button" aria-label="Open Admin Test Panel" title="Admin Test Panel">DEV</button>
-        <button id="btn-sound" class="pixel-btn icon-btn" type="button" aria-label="Toggle Sound" title="Toggle Sound">SFX</button>
-      </div>
-    </header>
-
-    <!-- Current map & water zone indicator -->
-    <div id="depth-badge" class="pixel-pill small-pill">SUNLIT PIER &bull; PIER</div>
-
-    <!-- Context hint banner -->
-    <div id="hint-banner" role="status" aria-live="polite">HOLD &amp; RELEASE TO CAST</div>
+    </div>
 
     <!-- Bottom mobile + desktop controls -->
     <footer id="hud-bottom">
       <div id="reel-panel" class="hidden" aria-label="Reeling meters">
+        <div id="reel-status-row">
+          <span id="reel-status-tag" class="status-calm">HOLD TO REEL!</span>
+          <span id="progress-pct" class="progress-pct">0%</span>
+        </div>
         <div class="meter-row">
           <span class="meter-label">LINE</span>
-          <div class="meter-track">
+          <div class="meter-track tension-track">
+            <div class="meter-sweet-zone" title="Sweet Spot (1.35x Reel Boost)"></div>
+            <div class="meter-danger-zone" title="Snap Risk"></div>
             <div id="tension-fill" class="meter-fill tension"></div>
-            <div class="meter-danger-zone"></div>
+            <div id="tension-needle" class="meter-needle"></div>
           </div>
         </div>
         <div class="meter-row">

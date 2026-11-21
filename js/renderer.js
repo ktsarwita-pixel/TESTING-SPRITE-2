@@ -663,17 +663,33 @@ function renderFishes(g, ctx, pal) {
       ctx.fillRect(lx, dy + 1, 4, 4);
     }
 
-    if (f.ai === 'HOOKED' && g.state === 'REELING' && g.fishThrashing) {
-      ctx.globalAlpha = 0.88;
-      ctx.fillStyle = '#f87171';
+    if (f.ai === 'HOOKED' && g.state === 'REELING') {
       const rx = Math.round(f.x);
       const ry = Math.round(f.y);
-      const r = 9 + (Math.floor(g.time * 20) % 5);
-      ctx.fillRect(rx - r, ry - 2, 2, 3);
-      ctx.fillRect(rx + r - 1, ry - 2, 2, 3);
-      ctx.fillStyle = '#fef08a';
-      ctx.fillRect(rx - r + 2, ry - 5, 2, 1);
-      ctx.fillRect(rx + r - 3, ry + 4, 2, 1);
+      if (g.fishFightState === 'WARNING') {
+        // Clear amber telegraph flash before thrash!
+        const pulse = Math.floor(g.time * 16) % 2 === 0;
+        ctx.globalAlpha = pulse ? 0.92 : 0.45;
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(rx - 1, dy - 7, 2, 4);
+        ctx.fillRect(rx - 1, dy - 2, 2, 1);
+      } else if (g.fishThrashing) {
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#f87171';
+        const r = 9 + (Math.floor(g.time * 22) % 5);
+        ctx.fillRect(rx - r, ry - 2, 2, 3);
+        ctx.fillRect(rx + r - 1, ry - 2, 2, 3);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(rx - r + 2, ry - 5, 2, 1);
+        ctx.fillRect(rx + r - 3, ry + 4, 2, 1);
+      }
+    } else if ((f.ai === 'CURIOUS' || f.ai === 'NIBBLE') && g.state === 'WAITING') {
+      // Subtle curiosity cue as fish inspects / nibbles the lure
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = f.ai === 'NIBBLE' ? '#fef08a' : '#bae6fd';
+      const cx = Math.round(f.x + f.dir * (sprSet.w * 0.35));
+      ctx.fillRect(cx, dy - 4, 1, 2);
+      ctx.fillRect(cx, dy - 1, 1, 1);
     }
     ctx.restore();
   }
@@ -748,20 +764,33 @@ function renderLineAndHook(g, ctx) {
   if (g.state === 'IDLE' || g.state === 'CHARGING' || g.state === 'CAUGHT') return;
   const rod = g.getRodTipPos();
 
-  const lineColor = g.state === 'REELING' && g.tension > 0.78 ? '#fca5a5' : '#e2e8f0';
-  if (g.state === 'WAITING') {
-    const midX = (rod.tipX + g.bobberX) * 0.5;
-    const midY = Math.max(rod.tipY, g.bobberY) + 5;
-    drawPixelQuad(ctx, rod.tipX, rod.tipY, midX, midY, g.bobberX, g.bobberY - 2, lineColor, 14);
-  } else if (g.state === 'LANDING') {
-    drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, lineColor);
+  const isDanger = g.state === 'REELING' && g.tension > 0.80;
+  const isSweet = g.state === 'REELING' && g.inSweetSpot;
+  const lineColor = isDanger ? '#fca5a5' : isSweet ? '#5eead4' : '#e2e8f0';
+
+  if (g.state === 'LANDING') {
+    drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#e2e8f0');
     return;
+  }
+
+  // Slack sag shrinks smoothly as line tension rises (realistic taut-vs-slack line!)
+  const sag = g.state === 'WAITING'
+    ? 6
+    : g.state === 'REELING'
+      ? Math.max(0, (1 - g.tension * 1.45) * 4.5)
+      : 1.2;
+
+  if (sag > 0.6) {
+    const midX = (rod.tipX + g.bobberX) * 0.5;
+    const midY = (rod.tipY + g.bobberY) * 0.5 + sag;
+    drawPixelQuad(ctx, rod.tipX, rod.tipY, midX, midY, g.bobberX, g.bobberY - 2, lineColor, 14);
   } else {
     drawPixelLine(ctx, rod.tipX, rod.tipY, g.bobberX, g.bobberY - 2, lineColor);
   }
 
   if (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING') {
-    drawPixelLine(ctx, g.bobberX, g.bobberY + 2, g.hookX, g.hookY, 'rgba(226,232,240,0.72)');
+    const subColor = isDanger ? 'rgba(252,165,165,0.85)' : isSweet ? 'rgba(94,234,212,0.85)' : 'rgba(226,232,240,0.75)';
+    drawPixelLine(ctx, g.bobberX, g.bobberY + 2, g.hookX, g.hookY, subColor);
     const hx = Math.round(g.hookX);
     const hy = Math.round(g.hookY);
     const lureLv = g.save.upgrades.lure || 1;
@@ -813,10 +842,11 @@ function renderAnglerAndRod(g, ctx) {
   const drawX = Math.round(g.anglerX);
   const drawY = Math.round(g.pierY - spr.h + 1);
 
+  // Grounded boot contact shadow on pier planks
   ctx.fillStyle = '#29160a';
-  ctx.fillRect(drawX + 3, g.pierY, 13, 1);
+  ctx.fillRect(drawX + 2, g.pierY, 18, 1);
   ctx.fillStyle = '#3d2210';
-  ctx.fillRect(drawX + 4, g.pierY + 1, 11, 1);
+  ctx.fillRect(drawX + 3, g.pierY + 1, 16, 1);
 
   ctx.drawImage(spr.canvas, drawX, drawY);
 
@@ -824,19 +854,40 @@ function renderAnglerAndRod(g, ctx) {
   const rodColor = rodColors[(g.save.upgrades.rod - 1) % rodColors.length];
   const rod = g.getRodTipPos();
 
-  const dirX = rod.tipX >= rod.handX ? 1 : -1;
-  ctx.fillStyle = '#111622';
-  ctx.fillRect(Math.round(rod.handX - dirX * 3), Math.round(rod.handY + 1), 3, 2);
-  ctx.fillStyle = '#b87a42';
-  ctx.fillRect(Math.round(rod.handX - dirX * 2), Math.round(rod.handY + 1), 2, 1);
+  // Cork butt handle extending realistically behind the gripping hand
+  const cosA = Math.cos(g.rodAngle);
+  const sinA = Math.sin(g.rodAngle);
+  const buttX = rod.handX - cosA * 5;
+  const buttY = rod.handY - sinA * 5;
+  drawPixelLine(ctx, buttX, buttY + 1, rod.handX, rod.handY + 1, '#111622');
+  drawPixelLine(ctx, buttX, buttY, rod.handX, rod.handY, '#b87a42');
 
-  drawPixelQuad(ctx, rod.handX, rod.handY, rod.ctrlX, rod.ctrlY, rod.tipX, rod.tipY, '#111622', 14);
-  drawPixelQuad(ctx, rod.handX, rod.handY - 1, rod.ctrlX, rod.ctrlY - 1, rod.tipX, rod.tipY - 1, rodColor, 14);
+  // Curved rod blank with crisp dark outline
+  drawPixelQuad(ctx, rod.handX, rod.handY, rod.ctrlX, rod.ctrlY, rod.tipX, rod.tipY, '#111622', 16);
+  drawPixelQuad(ctx, rod.handX, rod.handY - 1, rod.ctrlX, rod.ctrlY - 1, rod.tipX, rod.tipY - 1, rodColor, 16);
 
+  // Tip guide eye highlight
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(Math.round(rod.tipX), Math.round(rod.tipY - 1), 1, 1);
+
+  // Spinning reel seat + rotating crank handle connected to angler's reeling hand!
+  const reelSeatX = Math.round(rod.handX - cosA * 1.5);
+  const reelSeatY = Math.round(rod.handY + 1);
   ctx.fillStyle = '#111622';
-  ctx.fillRect(Math.round(rod.handX + dirX * 2), Math.round(rod.handY + 1), 3, 3);
-  ctx.fillStyle = '#cbd5e1';
-  ctx.fillRect(Math.round(rod.handX + dirX * 2 + 1), Math.round(rod.handY + 2), 1, 1);
+  ctx.fillRect(reelSeatX - 2, reelSeatY, 4, 4);
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillRect(reelSeatX - 1, reelSeatY + 1, 2, 2);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(reelSeatX - 1, reelSeatY + 1, 1, 1);
+
+  if (g.state === 'REELING' && (g.reelHold || g.devAutoLand) && !g.fishThrashing) {
+    const crankAngle = g.time * 14;
+    const kx = Math.round(reelSeatX + Math.cos(crankAngle) * 2.4);
+    const ky = Math.round(reelSeatY + 2 + Math.sin(crankAngle) * 2.4);
+    drawPixelLine(ctx, reelSeatX, reelSeatY + 2, kx, ky, '#cbd5e1');
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(kx, ky, 1, 1);
+  }
 
   if (g.state === 'CAUGHT' && g.lastCatchInfo) {
     const fSpr = g.sprites.fish[g.lastCatchInfo.species.id].right[Math.floor(g.time * 8) % 4];
