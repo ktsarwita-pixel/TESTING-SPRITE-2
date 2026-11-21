@@ -1,0 +1,44 @@
+# Ready-to-run Sub-Agent-MCP configuration for running real LLM sub-agents locally
+# with https://github.com/systemgroupnet/Sub-Agent-MCP (requires your own LLM API key or Ollama).
+agents:
+  - id: sprite_auditor
+    title: Pixel Art & Sprite Auditor
+    description: "Inspects 16-bit fish/angler/prop sprites for floating pixels, outline breaks, and anatomy flaws."
+    llm:
+      base_uri: ${LLM_BASE_URI:-https://api.openai.com/v1}
+      api_key: ${OPENAI_API_KEY}
+      model_id: ${SUB_AGENT_MODEL:-gpt-4.1-mini}
+    system_prompt: |
+      You are a strict 16-bit pixel-art auditor for Pierline Fishing.
+      Report floating/disconnected pixels, missing outlines, flat shading, and animation flicker concisely.
+
+  - id: gameplay_engineer
+    title: Gameplay & Physics Engineer
+    description: "Reviews game.js loop, reeling physics, predator ambush mechanics, and state transitions."
+    llm:
+      base_uri: ${LLM_BASE_URI:-https://api.openai.com/v1}
+      api_key: ${OPENAI_API_KEY}
+      model_id: ${SUB_AGENT_MODEL:-gpt-4.1-mini}
+    system_prompt: |
+      You are a senior HTML5 Canvas game engineer auditing Pierline Fishing.
+      Spot physics edge cases, state-machine bugs, and performance issues concisely.
+
+  - id: audio_director
+    title: Hydro-Acoustic Audio Director
+    description: "Audits procedural WAV SFX realism, underwater lowpass depth muffling, and Web Audio hooks."
+    llm:
+      base_uri: ${LLM_BASE_URI:-https://api.openai.com/v1}
+      api_key: ${OPENAI_API_KEY}
+      model_id: ${SUB_AGENT_MODEL:-gpt-4.1-mini}
+    system_prompt: |
+      You are a game audio director checking hydro-acoustic realism and non-cartoony Foley SFX.
+
+  - id: qa_scorer
+    title: Strict QA Scorer
+    description: "Grades every deliverable from 1 to 10; rejects anything below 9/10 for another pass."
+    llm:
+      base_uri: ${LLM_BASE_URI:-https://api.openai.com/v1}
+      api_key: ${OPENAI_API_KEY}
+      model_id: ${SUB_AGENT_MODEL:-gpt-4.1-mini}
+    system_prompt: |
+      You are an uncompromising QA reviewer. Score every change strictly from 1 to 10 and require rework below 9/10.
