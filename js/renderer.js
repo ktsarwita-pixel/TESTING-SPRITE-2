@@ -1,5 +1,6 @@
 // Crisp 16-bit 2D pixel-art side-POV renderer supporting 4 distinct fishing maps & rich animations.
 import { getMapById } from './maps.js';
+import { renderArticulatedAngler } from './anglerRenderer.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -308,40 +309,82 @@ function renderHorizon(g, ctx, map, pal) {
   }
 }
 
+function lerpRgbStr(rgbA, rgbB, t) {
+  const ma = rgbA.match(/\d+/g).map(Number);
+  const mb = rgbB.match(/\d+/g).map(Number);
+  return `rgb(${Math.round(lerp(ma[0], mb[0], t))},${Math.round(lerp(ma[1], mb[1], t))},${Math.round(lerp(ma[2], mb[2], t))})`;
+}
+
 function renderUnderwaterBg(g, ctx, map, pal) {
   const wy = g.waterY;
-  const h = g.vh - wy;
-  const b1 = Math.round(h * 0.34);
-  const b2 = Math.round(h * 0.68);
+  const h = Math.max(12, g.vh - wy);
 
-  ctx.fillStyle = pal.water[0];
-  ctx.fillRect(0, wy, g.vw, b1 + 1);
-  ctx.fillStyle = pal.water[1];
-  ctx.fillRect(0, wy + b1, g.vw, b2 - b1 + 1);
-  ctx.fillStyle = pal.water[2];
-  ctx.fillRect(0, wy + b2, g.vw, h - b2 + 1);
+  // 6-band richly dithered underwater depth gradient (smooth 16-bit cross-section!)
+  const bands = [
+    pal.water[0],
+    lerpRgbStr(pal.water[0], pal.water[1], 0.45),
+    pal.water[1],
+    lerpRgbStr(pal.water[1], pal.water[2], 0.48),
+    pal.water[2],
+    lerpRgbStr(pal.water[2], 'rgb(6,13,28)', 0.42),
+  ];
+  const bandH = Math.ceil(h / bands.length);
+  for (let i = 0; i < bands.length; i++) {
+    const by = wy + i * bandH;
+    ctx.fillStyle = bands[i];
+    ctx.fillRect(0, by, g.vw, bandH + 1);
+    // 2-row 16-bit checkerboard Bayer dither across each depth seam
+    if (i > 0) {
+      const shift = Math.floor(Math.sin(g.time * 0.8 + i) * 2);
+      for (let x = 0; x < g.vw; x += 2) {
+        ctx.fillRect(x + ((i + shift) & 1), by - 1, 1, 1);
+      }
+      for (let x = 0; x < g.vw; x += 4) {
+        ctx.fillRect(x + ((i + 1) & 1), by - 2, 1, 1);
+      }
+    }
+  }
 
-  ctx.fillStyle = pal.water[1];
-  for (let x = 0; x < g.vw; x += 2) ctx.fillRect(x, wy + b1 - 1, 1, 1);
-  ctx.fillStyle = pal.water[2];
-  for (let x = 1; x < g.vw; x += 2) ctx.fillRect(x, wy + b2 - 1, 1, 1);
-
-  // Daytime underwater light shafts
-  if (pal.night < 0.75) {
+  // Animated underwater caustics web near surface & shimmering sunbeams
+  if (pal.night < 0.78) {
+    const dayStrength = 1 - pal.night;
+    const beamColor = map.id === 'abyss' ? '#fdba74' : map.id === 'lagoon' ? '#a7f3d0' : '#bae6fd';
     ctx.save();
-    ctx.globalAlpha = (1 - pal.night) * (map.id === 'lagoon' ? 0.13 : 0.09);
-    ctx.fillStyle = map.id === 'abyss' ? '#fdba74' : '#bae6fd';
-    for (let i = 0; i < 4; i++) {
-      const rx = Math.round(g.pierEndX + 18 + i * ((g.vw - g.pierEndX) / 4) + Math.sin(g.time * 0.6 + i) * 7);
-      const rayH = Math.round(h * 0.74);
-      for (let dy = 0; dy < rayH; dy += 2) {
-        const shift = Math.round(dy * 0.25);
-        const w = Math.max(2, Math.round(9 - dy * 0.032));
+    ctx.fillStyle = beamColor;
+    // Diagonal shimmering light shafts
+    for (let i = 0; i < 5; i++) {
+      const rx = Math.round(g.pierEndX + 10 + i * ((g.vw - g.pierEndX) / 4.6) + Math.sin(g.time * 0.7 + i * 1.4) * 8);
+      const rayH = Math.round(h * 0.78);
+      const pulse = 0.75 + 0.25 * Math.sin(g.time * 1.8 + i * 2.1);
+      ctx.globalAlpha = dayStrength * (map.id === 'lagoon' ? 0.13 : 0.085) * pulse;
+      for (let dy = 2; dy < rayH; dy += 2) {
+        const shift = Math.round(dy * 0.24);
+        const w = Math.max(2, Math.round(10 - dy * 0.032));
         ctx.fillRect(rx + shift, wy + dy, w, 2);
       }
     }
+    // Shallow subsurface caustic shimmer lines right beneath the wave crest
+    ctx.globalAlpha = dayStrength * (map.id === 'lagoon' ? 0.24 : 0.16);
+    for (let x = 2; x < g.vw - 2; x += 6) {
+      const cw = 2 + Math.round(Math.sin(x * 0.14 + g.time * 3.1) * 1.5);
+      const cy = wy + 5 + Math.round(Math.cos(x * 0.11 - g.time * 2.4) * 2.5);
+      if (cw > 1) ctx.fillRect(x, cy, cw, 1);
+      const cy2 = wy + 12 + Math.round(Math.sin(x * 0.08 + g.time * 1.9) * 3);
+      if (cw > 2) ctx.fillRect(x + 2, cy2, cw - 1, 1);
+    }
     ctx.restore();
   }
+
+  // Gently drifting translucent marine snow / plankton motes
+  ctx.save();
+  ctx.fillStyle = map.id === 'abyss' ? '#fca5a5' : '#e0f7ff';
+  for (let i = 0; i < 16; i++) {
+    const mx = Math.round(((i * 37 + g.time * (2.2 + (i % 3) * 0.9)) % (g.vw - 8)) + 4);
+    const my = Math.round(wy + 10 + ((i * 23) % Math.max(18, h - 24)) + Math.sin(g.time * 1.5 + i) * 3);
+    ctx.globalAlpha = 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(g.time * 2.4 + i * 1.7));
+    ctx.fillRect(mx, my, 1, 1);
+  }
+  ctx.restore();
 
   // Biome-specific background seabed landmarks
   const leftSpotX = Math.round(g.pierEndX + (g.vw - g.pierEndX) * 0.28);
@@ -423,6 +466,17 @@ function renderUnderwaterBg(g, ctx, map, pal) {
     if (p.x >= g.vw) continue;
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x, g.getSeabedY(p.x) + p.dy, p.w, 1);
+  }
+  // Soft sunlit caustic glints dancing along the seabed ridge
+  if (pal.night < 0.65) {
+    ctx.save();
+    ctx.globalAlpha = (1 - pal.night) * 0.24;
+    ctx.fillStyle = map.id === 'abyss' ? '#fb923c' : '#e0f7ff';
+    for (let x = g.pierEndX + 4; x < g.vw - 4; x += 11) {
+      const cx = x + Math.round(Math.sin(g.time * 1.7 + x * 0.08) * 3);
+      if (cx > 0 && cx < g.vw - 3) ctx.fillRect(cx, g.getSeabedY(cx), 3, 1);
+    }
+    ctx.restore();
   }
 
   // Cute seabed starfish & shell accents in Harbor & Lagoon
@@ -710,27 +764,49 @@ function renderWaterSurface(g, ctx, map, pal, cel) {
     ctx.restore();
   }
 
-  const crestDay = map.id === 'abyss' ? '#fb923c' : map.id === 'lagoon' ? '#99f6e4' : '#7dd3fc';
-  const crestNight = map.id === 'abyss' ? '#7c3aed' : '#335c85';
-  const subDay = map.id === 'abyss' ? '#7c2d12' : map.id === 'lagoon' ? '#2dd4bf' : '#3ca3b8';
+  const crestDay = map.id === 'abyss' ? '#fdba74' : map.id === 'lagoon' ? '#ccfbf1' : '#bae6fd';
+  const crestNight = map.id === 'abyss' ? '#9333ea' : '#4a76a8';
+  const meniscusDay = map.id === 'abyss' ? '#ea580c' : map.id === 'lagoon' ? '#5eead4' : '#56c2db';
+  const subDay = map.id === 'abyss' ? '#7c2d12' : map.id === 'lagoon' ? '#14b8a6' : '#2b88a8';
+  const foamCol = lerpColor('#f8fafc', '#82a9d1', pal.night);
 
+  const crestCol = lerpColor(crestDay, crestNight, pal.night);
+  const menCol = lerpColor(meniscusDay, '#2e5782', pal.night);
+  const subCol = lerpColor(subDay, '#1e3e61', pal.night);
+
+  // Dual-harmonic animated surface waves with backlit underside meniscus & glinting crests
   for (let x = 0; x < g.vw; x++) {
-    const wave = Math.round(Math.sin(x * 0.12 + g.time * 3.0) * 1.15);
-    ctx.fillStyle = lerpColor(crestDay, crestNight, pal.night);
-    ctx.fillRect(x, wy + wave, 1, 1);
-    ctx.fillStyle = lerpColor(subDay, '#22456b', pal.night);
-    ctx.fillRect(x, wy + wave + 1, 1, 1);
-    if ((x + Math.floor(g.time * 7)) % 9 === 0) {
-      ctx.fillStyle = lerpColor('#eef7ff', '#6b91ba', pal.night);
-      ctx.fillRect(x, wy + wave, 2, 1);
+    const w1 = Math.sin(x * 0.085 + g.time * 2.5) * 1.25;
+    const w2 = Math.sin(x * 0.19 - g.time * 1.85) * 0.55;
+    const wave = Math.round(w1 + w2);
+    const y0 = wy + wave;
+
+    // Bright surface highlight rim
+    ctx.fillStyle = crestCol;
+    ctx.fillRect(x, y0, 1, 1);
+    // Glowing side-POV wave underside meniscus
+    ctx.fillStyle = menCol;
+    ctx.fillRect(x, y0 + 1, 1, 1);
+    ctx.fillStyle = subCol;
+    ctx.fillRect(x, y0 + 2, 1, 1);
+
+    // Moving whitecap glints on wave peaks
+    if (w1 + w2 > 0.95 && ((x + Math.floor(g.time * 6)) % 5 === 0)) {
+      ctx.fillStyle = foamCol;
+      ctx.fillRect(x, y0, 2, 1);
     }
   }
 
-  const foamShift = Math.floor(g.time * 3) % 2;
-  ctx.fillStyle = lerpColor('#e0f7ff', '#6488b0', pal.night);
+  // Animated lapping waterline foam around every dock piling
+  const lap = Math.round(Math.sin(g.time * 3.8));
+  ctx.fillStyle = foamCol;
   for (let px = 8; px <= g.pierEndX - 8; px += 22) {
-    ctx.fillRect(px - 1 - foamShift, wy, 2, 1);
-    ctx.fillRect(px + 5 + foamShift, wy, 2, 1);
+    ctx.fillRect(px - 2 - (lap > 0 ? 1 : 0), wy, 3, 1);
+    ctx.fillRect(px + 5 + (lap < 0 ? 1 : 0), wy, 3, 1);
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(px - 1, wy + 2, 8, 1);
+    ctx.restore();
   }
 
   for (const r of g.ripples) {
@@ -834,67 +910,7 @@ function renderLineAndHook(g, ctx) {
 }
 
 function renderAnglerAndRod(g, ctx) {
-  const pose = g.getAnglerPose();
-  const spr = g.sprites.angler[pose] || g.sprites.angler.idle0;
-  const drawX = Math.round(g.anglerX);
-  const drawY = Math.round(g.pierY - spr.h + 1);
-
-  // Grounded boot contact shadow on pier planks
-  ctx.fillStyle = '#29160a';
-  ctx.fillRect(drawX + 2, g.pierY, 18, 1);
-  ctx.fillStyle = '#3d2210';
-  ctx.fillRect(drawX + 3, g.pierY + 1, 16, 1);
-
-  ctx.drawImage(spr.canvas, drawX, drawY);
-
-  const rodColors = ['#c99755', '#60a5fa', '#cbd5e1', '#2dd4bf', '#facc15'];
-  const rodColor = rodColors[(g.save.upgrades.rod - 1) % rodColors.length];
-  const rod = g.getRodTipPos();
-
-  // Cork butt handle extending realistically behind the gripping hand
-  const cosA = Math.cos(g.rodAngle);
-  const sinA = Math.sin(g.rodAngle);
-  const buttX = rod.handX - cosA * 5;
-  const buttY = rod.handY - sinA * 5;
-  drawPixelLine(ctx, buttX, buttY + 1, rod.handX, rod.handY + 1, '#111622');
-  drawPixelLine(ctx, buttX, buttY, rod.handX, rod.handY, '#b87a42');
-
-  // Curved rod blank with crisp dark outline
-  drawPixelQuad(ctx, rod.handX, rod.handY, rod.ctrlX, rod.ctrlY, rod.tipX, rod.tipY, '#111622', 16);
-  drawPixelQuad(ctx, rod.handX, rod.handY - 1, rod.ctrlX, rod.ctrlY - 1, rod.tipX, rod.tipY - 1, rodColor, 16);
-
-  // Tip guide eye highlight
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillRect(Math.round(rod.tipX), Math.round(rod.tipY - 1), 1, 1);
-
-  // Spinning reel seat + rotating crank handle connected to angler's reeling hand!
-  const reelSeatX = Math.round(rod.handX - cosA * 1.5);
-  const reelSeatY = Math.round(rod.handY + 1);
-  ctx.fillStyle = '#111622';
-  ctx.fillRect(reelSeatX - 2, reelSeatY, 4, 4);
-  ctx.fillStyle = '#94a3b8';
-  ctx.fillRect(reelSeatX - 1, reelSeatY + 1, 2, 2);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillRect(reelSeatX - 1, reelSeatY + 1, 1, 1);
-
-  if (g.state === 'REELING' && (g.reelHold || g.devAutoLand) && !g.fishThrashing) {
-    const crankAngle = g.time * 14;
-    const kx = Math.round(reelSeatX + Math.cos(crankAngle) * 2.4);
-    const ky = Math.round(reelSeatY + 2 + Math.sin(crankAngle) * 2.4);
-    drawPixelLine(ctx, reelSeatX, reelSeatY + 2, kx, ky, '#cbd5e1');
-    ctx.fillStyle = '#facc15';
-    ctx.fillRect(kx, ky, 1, 1);
-  }
-
-  if (g.state === 'CAUGHT' && g.lastCatchInfo) {
-    const fSpr = g.sprites.fish[g.lastCatchInfo.species.id].right[Math.floor(g.time * 8) % 4];
-    const bob = Math.round(Math.sin(g.time * 7) * 1.2);
-    ctx.drawImage(
-      fSpr,
-      Math.round(drawX + spr.hand[0] - fSpr.width / 2),
-      Math.round(drawY + spr.hand[1] - fSpr.height / 2 + bob)
-    );
-  }
+  renderArticulatedAngler(g, ctx);
 }
 
 function renderEffects(g, ctx, map, pal) {

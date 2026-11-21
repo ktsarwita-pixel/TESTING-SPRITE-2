@@ -3,6 +3,7 @@ import { FISH_SPECIES, RARITY_META, UPGRADES, getUpgradeCost, getSpeciesById } f
 import { MAPS, getMapById } from './maps.js';
 import { buildSpriteCache, spriteToDataURL } from './sprites.js';
 import { renderGameWorld } from './renderer.js';
+import { computeAnglerRig } from './anglerRenderer.js';
 import { sound } from './audio.js';
 
 const SAVE_KEY = 'pierline_pixel_fishing_v1';
@@ -140,8 +141,16 @@ class PierlineGame {
     this.inSweetSpot = false;
     this.bobDipImpulse = 0;
     this.activePointerId = null;
+    this.retrieving = false;
+    this.mouthDirSmooth = -1;
+    // Articulated 60fps angler kinematics
+    this.animLean = 0;
+    this.animSquat = 0;
+    this.animStance = 0.1;
+    this.crankAngle = 0;
     this.reelHold = false;
     this.chargeHold = false;
+    this.retrieving = false;
     this.reelTickAccum = 0;
     this.landingT = 0;
     this.landingStartX = 0;
@@ -397,10 +406,10 @@ class PierlineGame {
   }
 
   getCelebrateHandPos() {
-    const cel = this.sprites.angler.celebrate0 || this.sprites.angler.idle0;
+    const rig = computeAnglerRig(this);
     return {
-      x: this.anglerX + cel.hand[0],
-      y: (this.pierY - cel.h + 1) + cel.hand[1],
+      x: rig.shoulderX + 9.5,
+      y: rig.headY - 4.5,
     };
   }
 
@@ -785,8 +794,8 @@ class PierlineGame {
       this.chargeDir = 1;
       this.updateControlsUI();
     } else if (this.state === 'WAITING') {
-      this.spawnSplash(this.bobberX, this.waterY, 4);
-      this.resetToIdle('LINE RETRIEVED');
+      this.retrieving = true;
+      this.updateControlsUI();
     } else if (this.state === 'BITE') {
       this.hookFish();
     } else if (this.state === 'REELING') {
@@ -798,6 +807,13 @@ class PierlineGame {
     if (this.state === 'CHARGING' && this.chargeHold) {
       this.chargeHold = false;
       this.launchCast();
+    }
+    if (this.retrieving) {
+      this.retrieving = false;
+      if (this.state === 'WAITING') {
+        this.targetDepthY = clamp(this.hookY, this.waterY + 8, this.getSeabedY(this.hookX) - 6);
+        this.updateControlsUI();
+      }
     }
     this.reelHold = false;
   }
@@ -838,7 +854,9 @@ class PierlineGame {
     this.tension = 0.22;
     this.progress = 0;
     this.reelHold = true;
+    this.retrieving = false;
     this.devAutoLand = false;
+    this.mouthDirSmooth = fish.dir;
     this.fishThrashing = false;
     this.fishFightState = 'CALM';
     this.fishStamina = clamp(fish.species.stamina || 1.0, 0.7, 2.0);
@@ -865,6 +883,7 @@ class PierlineGame {
     this.state = 'IDLE';
     this.reelHold = false;
     this.chargeHold = false;
+    this.retrieving = false;
     this.devAutoLand = false;
     this.tension = 0;
     this.progress = 0;
@@ -1105,8 +1124,9 @@ class PierlineGame {
       btn.textContent = 'CASTING...';
       hint.textContent = 'WATCH THE BOBBER!';
     } else if (this.state === 'WAITING') {
-      btn.textContent = 'PULL BACK';
-      hint.textContent = 'WAIT FOR A FISH TO BITE...';
+      btn.textContent = this.retrieving ? 'REELING LURE IN...' : 'HOLD TO REEL IN';
+      if (this.retrieving) btn.classList.add('is-reel');
+      hint.textContent = this.retrieving ? 'RELEASE TO PAUSE LURE AT THIS DEPTH' : 'WAIT FOR BITE — OR HOLD TO REEL UP MANUALLY';
     } else if (this.state === 'BITE') {
       btn.textContent = 'HOOK IT NOW!';
       btn.classList.add('is-bite');
@@ -1162,29 +1182,24 @@ class PierlineGame {
   getTargetRodAngle() {
     if (this.state === 'CHARGING') return lerp(-0.85, -2.42, this.chargePower);
     if (this.state === 'CASTING') return lerp(-2.2, -0.35, Math.min(1, this.castT * 2.2));
+    if (this.state === 'WAITING' && this.retrieving) return -0.84;
     if (this.state === 'BITE') return -0.34 + Math.sin(this.time * 24) * 0.06;
     if (this.state === 'REELING') return (this.reelHold || this.devAutoLand) ? -1.04 : -0.60;
-    if (this.state === 'LANDING') return lerp(-1.04, -1.32, smoothstep(clamp(this.landingT, 0, 1)));
-    if (this.state === 'CAUGHT') return -1.32;
+    if (this.state === 'LANDING') return lerp(-1.04, -1.92, smoothstep(clamp(this.landingT, 0, 1)));
+    if (this.state === 'CAUGHT') return -1.92;
     return -0.62;
   }
 
   getRodTipPos() {
-    const pose = this.getAnglerPose();
-    const spr = this.sprites.angler[pose] || this.sprites.angler.idle0;
-    const drawY = this.pierY - spr.h + 1;
-    const handX = this.smoothHandX !== null ? this.smoothHandX : (this.anglerX + spr.hand[0]);
-    const handY = this.smoothHandY !== null ? this.smoothHandY : (drawY + spr.hand[1]);
-    const rodLen = 27 + (this.save.upgrades.rod - 1) * 2.2;
-
-    const tipBaseX = handX + Math.cos(this.rodAngle) * rodLen;
-    const tipBaseY = handY + Math.sin(this.rodAngle) * rodLen;
-    const bend = this.rodFlex * 13;
-    const tipX = tipBaseX + bend * 0.28;
-    const tipY = tipBaseY + bend;
-    const ctrlX = lerp(handX, tipX, 0.56);
-    const ctrlY = lerp(handY, tipY, 0.56) - 4 + bend * 0.22;
-    return { handX, handY, ctrlX, ctrlY, tipX, tipY };
+    const rig = computeAnglerRig(this);
+    return {
+      handX: rig.rodHandX,
+      handY: rig.rodHandY,
+      ctrlX: rig.ctrlX,
+      ctrlY: rig.ctrlY,
+      tipX: rig.tipX,
+      tipY: rig.tipY,
+    };
   }
 
   spawnSplash(x, y, count = 8) {
@@ -1221,16 +1236,50 @@ class PierlineGame {
     if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
 
     // Smooth rod angle interpolation (no abrupt snaps across states!)
-    this.rodAngle = lerp(this.rodAngle, this.getTargetRodAngle(), 1 - Math.exp(-12 * dt));
-    const curPose = this.getAnglerPose();
-    const curSpr = this.sprites.angler[curPose] || this.sprites.angler.idle0;
-    const rawHX = this.anglerX + curSpr.hand[0];
-    const rawHY = (this.pierY - curSpr.h + 1) + curSpr.hand[1];
-    if (this.smoothHandX === null) { this.smoothHandX = rawHX; this.smoothHandY = rawHY; }
-    else {
-      this.smoothHandX = lerp(this.smoothHandX, rawHX, 1 - Math.exp(-18 * dt));
-      this.smoothHandY = lerp(this.smoothHandY, rawHY, 1 - Math.exp(-18 * dt));
+    this.rodAngle = lerp(this.rodAngle, this.getTargetRodAngle(), 1 - Math.exp(-11 * dt));
+
+    // Smooth 60fps articulated human body kinematics (zero jumping!)
+    let targetLean = 0;
+    let targetSquat = 0;
+    let targetStance = 0.12;
+    if (this.state === 'CHARGING') {
+      targetLean = -this.chargePower * 3.8;
+      targetSquat = this.chargePower * 1.1;
+      targetStance = 0.55;
+    } else if (this.state === 'CASTING') {
+      targetLean = 2.6;
+      targetSquat = 0.7;
+      targetStance = 0.6;
+    } else if (this.state === 'WAITING') {
+      targetLean = this.retrieving ? 0.5 : 1.4;
+      targetSquat = this.retrieving ? 0.85 : 0.45;
+      targetStance = this.retrieving ? 0.65 : 0.45;
+      if (this.retrieving) this.crankAngle += 13.5 * dt;
+    } else if (this.state === 'BITE') {
+      targetLean = -1.2;
+      targetSquat = 1.4;
+      targetStance = 0.85;
+    } else if (this.state === 'REELING') {
+      targetStance = 1.0;
+      if (this.fishThrashing || this.tension > 0.74) {
+        targetLean = -3.4 - this.tension * 1.5;
+        targetSquat = 2.0;
+      } else {
+        targetLean = -0.7 - this.tension * 2.1;
+        targetSquat = 1.25;
+        if (this.reelHold || this.devAutoLand) {
+          this.crankAngle += (this.inSweetSpot ? 17.5 : 12.5) * dt;
+        }
+      }
+    } else if (this.state === 'LANDING' || this.state === 'CAUGHT') {
+      targetLean = 0.5;
+      targetSquat = 0;
+      targetStance = 0.3;
     }
+    const kinEase = 1 - Math.exp(-10 * dt);
+    this.animLean = lerp(this.animLean, targetLean, kinEase);
+    this.animSquat = lerp(this.animSquat, targetSquat, kinEase);
+    this.animStance = lerp(this.animStance, targetStance, kinEase);
 
     const map = this.getCurrentMap();
 
@@ -1336,10 +1385,44 @@ class PierlineGame {
       }
     } else if (this.state === 'WAITING') {
       this.bobDipImpulse *= Math.exp(-9 * dt);
-      this.bobberY = this.waterY + Math.sin(this.time * 4.2) * 1.1 + this.bobDipImpulse;
-      this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, 1 - Math.exp(-4 * dt));
-      this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-1.9 * dt));
-      this.rodFlex = lerp(this.rodFlex, 0.04, 1 - Math.exp(-6 * dt));
+      if (this.retrieving) {
+        // Player manually cranks the lure upward & back toward the pier (ZERO instant teleport!)
+        const retrieveSpd = 42 + (this.save.upgrades.rod - 1) * 8;
+        const pierEdgeX = this.pierEndX + 10;
+        const dxPier = pierEdgeX - this.bobberX;
+        const stepX = Math.sign(dxPier) * Math.min(Math.abs(dxPier), retrieveSpd * 0.92 * dt);
+        this.bobberX += stepX;
+        this.bobberY = this.waterY + 1.2 + Math.sin(this.time * 12) * 0.6 + this.bobDipImpulse;
+
+        // Hook rises smoothly up through the water while trailing slightly behind the bobber
+        const targetRiseY = this.waterY + 3;
+        const dyUp = targetRiseY - this.hookY;
+        const stepY = Math.sign(dyUp) * Math.min(Math.abs(dyUp), retrieveSpd * 0.85 * dt);
+        this.hookY += stepY;
+        this.hookX = lerp(this.hookX, this.bobberX + 3, 1 - Math.exp(-6 * dt));
+        this.targetDepthY = Math.max(this.waterY + 6, this.hookY);
+        this.rodFlex = lerp(this.rodFlex, 0.14, 1 - Math.exp(-8 * dt));
+
+        this.reelTickAccum += dt;
+        if (this.reelTickAccum > 0.14) {
+          this.reelTickAccum = 0;
+          sound.playReelTick(0.18);
+        }
+        if (Math.random() < dt * 7) this.spawnRipple(this.bobberX, this.waterY);
+
+        // Only finish retrieving once the player actually reels the lure all the way back to the pier surface!
+        if (Math.abs(this.bobberX - pierEdgeX) <= 3 && this.hookY <= this.waterY + 5.5) {
+          this.retrieving = false;
+          this.spawnSplash(this.bobberX, this.waterY, 5);
+          sound.playSplash(false);
+          this.resetToIdle('LURE REELED IN');
+        }
+      } else {
+        this.bobberY = this.waterY + Math.sin(this.time * 4.2) * 1.1 + this.bobDipImpulse;
+        this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, 1 - Math.exp(-4 * dt));
+        this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-1.9 * dt));
+        this.rodFlex = lerp(this.rodFlex, 0.04, 1 - Math.exp(-6 * dt));
+      }
     } else if (this.state === 'BITE') {
       this.biteTimer -= dt;
       this.bobberY = lerp(this.bobberY, this.waterY + 2.4 + Math.sin(this.time * 26) * 1.4, 1 - Math.exp(-14 * dt));
@@ -1523,15 +1606,16 @@ class PierlineGame {
     const maxY = Math.max(minY + 4, this.getSeabedY(fish.x) - 6);
     fish.y = clamp(fish.y + fish.vy * dt, minY, maxY);
 
-    // Smooth non-flickering facing direction
-    if (fish.vx > 8) fish.dir = 1;
-    else if (fish.vx < -4) fish.dir = -1;
-
-    const mouth = this.getFishMouthPos(fish);
-    this.hookX = mouth.x;
-    this.hookY = mouth.y;
+    // Wide-hysteresis facing direction + smoothly interpolated hook mouth offset (ZERO snap on turn!)
+    if (fish.vx > 12) fish.dir = 1;
+    else if (fish.vx < -6) fish.dir = -1;
+    this.mouthDirSmooth = lerp(this.mouthDirSmooth, fish.dir, 1 - Math.exp(-10 * dt));
+    const fSpr = this.sprites.fish[fish.species.id];
+    const halfW = fSpr ? fSpr.w * 0.36 : 6;
+    this.hookX = fish.x + this.mouthDirSmooth * halfW;
+    this.hookY = fish.y;
     const rod = this.getRodTipPos();
-    const bobTargetX = clamp(lerp(rod.tipX, mouth.x, 0.76), this.pierEndX + 6, this.vw - 8);
+    const bobTargetX = clamp(lerp(rod.tipX, this.hookX, 0.76), this.pierEndX + 6, this.vw - 8);
     this.bobberX = lerp(this.bobberX, bobTargetX, 1 - Math.exp(-7 * dt));
     const bobDip = this.tension * 3.2 + (this.fishThrashing ? Math.sin(this.time * 24) * 1.2 : 0);
     this.bobberY = lerp(this.bobberY, this.waterY + bobDip, 1 - Math.exp(-12 * dt));
