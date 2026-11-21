@@ -9,7 +9,7 @@
   --accent-red: #ef4444;
   --text-main: #f8fafc;
   --text-dim: #94a3b8;
-  --pixel-font: 'Courier New', 'Lucida Console', ui-monospace, monospace;
+  --pixel-font: 'Consolas', 'Menlo', 'Monaco', 'Liberation Mono', 'DejaVu Sans Mono', ui-monospace, monospace;
 }
 
 * {
@@ -30,6 +30,10 @@ body {
   background: #091529;
   color: var(--text-main);
   font-family: var(--pixel-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  font-variant-numeric: tabular-nums;
   overscroll-behavior: none;
   touch-action: manipulation;
 }
@@ -101,20 +105,21 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(13, 21, 38, 0.88);
+  background: rgba(13, 21, 38, 0.90);
   border: 2px solid var(--border-dark);
   box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.14), 0 2px 0 rgba(7, 11, 20, 0.72);
   padding: 5px 8px;
-  font-size: clamp(11px, 2.5vw, 13px);
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.4px;
   line-height: 1;
   color: var(--text-main);
+  text-shadow: 1px 1px 0 #070b14;
   white-space: nowrap;
 }
 
 .pill-label {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text-dim);
   letter-spacing: 0.6px;
 }
@@ -131,21 +136,22 @@ body {
 
 #depth-badge {
   pointer-events: none;
-  font-size: clamp(10px, 2.2vw, 11px);
+  font-size: 11px;
   padding: 4px 8px;
   color: #bae6fd;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
 }
 
 #hint-banner {
   pointer-events: none;
-  background: rgba(13, 21, 38, 0.84);
+  background: rgba(13, 21, 38, 0.88);
   border: 2px solid var(--border-dark);
   padding: 4px 8px;
-  font-size: clamp(10px, 2.2vw, 11px);
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: 0.4px;
   color: #fef08a;
+  text-shadow: 1px 1px 0 #070b14;
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
@@ -155,10 +161,11 @@ body {
 /* ── Crisp Instant-Response Buttons ──────────────────────────────────────── */
 .pixel-btn {
   font-family: var(--pixel-font);
-  font-size: clamp(11px, 2.4vw, 12px);
-  font-weight: 800;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
   color: var(--text-main);
+  text-shadow: 1px 1px 0 #070b14;
   background: var(--bg-panel-2);
   border: 2px solid var(--border-dark);
   box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.16), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 3px 0 rgba(7, 11, 20, 0.78);
@@ -188,6 +195,7 @@ body {
 .pixel-btn.accent-gold {
   background: #ca8a04;
   color: #111827;
+  text-shadow: none;
   border-color: #422006;
   box-shadow: inset 0 2px 0 #fef08a, inset 0 -2px 0 #854d0e, 0 3px 0 rgba(7, 11, 20, 0.78);
 }
@@ -404,9 +412,9 @@ body {
 #action-btn.action-primary {
   width: min(340px, 92vw);
   min-height: 50px;
-  font-size: clamp(14px, 3.6vw, 16px);
-  font-weight: 900;
-  letter-spacing: 0.9px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
   padding: 12px 16px;
   touch-action: none;
   background: #1d4ed8;
@@ -418,8 +426,9 @@ body {
 #action-btn.is-bite {
   background: #f59e0b;
   color: #111827;
+  text-shadow: none;
   box-shadow: inset 0 3px 0 #fef08a, inset 0 -3px 0 #b45309, 0 4px 0 rgba(7, 11, 20, 0.85);
-  animation: bitePop 0.26s infinite alternate;
+  animation: bitePop 0.26s steps(2, end) infinite;
 }
 
 #action-btn.is-reel {
@@ -447,8 +456,8 @@ body {
 }
 
 @keyframes bitePop {
-  from { transform: scale(1); }
-  to { transform: scale(1.025); }
+  0% { transform: translateY(0); filter: brightness(1); }
+  100% { transform: translateY(-2px); filter: brightness(1.12); }
 }
 
 /* ── Modals & Catch Card ─────────────────────────────────────────────────── */
@@ -494,9 +503,10 @@ body {
 }
 
 .modal-header h2 {
-  font-size: clamp(13px, 3.2vw, 15px);
-  font-weight: 900;
-  letter-spacing: 0.8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-shadow: 1px 1px 0 #070b14;
 }
 
 .modal-coins {

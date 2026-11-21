@@ -185,6 +185,7 @@ class PierlineGame {
     this.pebbles = [];
     this.corals = [];
     this.fireflies = [];
+    this.shootingStars = [];
     this.weatherParticles = [];
     this.bubbles = [];
     this.ripples = [];
@@ -362,11 +363,13 @@ class PierlineGame {
   }
 
   initWorldScenery() {
-    this.stars = Array.from({ length: 42 }, () => ({
+    const starTints = ['#fef9c3', '#e0f2fe', '#f8fafc', '#f5d0fe', '#bae6fd'];
+    this.stars = Array.from({ length: 64 }, (_, i) => ({
       x: Math.random(),
-      y: Math.random() * 0.78,
+      y: Math.random() * 0.80,
       phase: Math.random() * Math.PI * 2,
-      bright: Math.random() > 0.65,
+      bright: i % 3 === 0 || Math.random() > 0.72,
+      tint: starTints[i % starTints.length],
     }));
 
     this.clouds = Array.from({ length: 5 }, (_, i) => ({
@@ -448,10 +451,10 @@ class PierlineGame {
       { x: Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.52), sprite: 'coral1' },
       { x: Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.86), sprite: 'coral0' },
     ];
-    this.fireflies = Array.from({ length: 7 }, (_, i) => ({
-      x: Math.round(rand(6, this.pierEndX + 26)),
-      y: Math.round(rand(Math.max(8, this.pierY - 26), this.pierY - 3)),
-      phase: i * 1.3 + rand(0, 1.5),
+    this.fireflies = Array.from({ length: 12 }, (_, i) => ({
+      x: Math.round(rand(4, i < 8 ? this.pierEndX + 28 : this.vw - 16)),
+      y: Math.round(rand(Math.max(8, this.pierY - 26), this.waterY - 4)),
+      phase: i * 1.15 + rand(0, 1.5),
     }));
   }
 
@@ -1604,6 +1607,35 @@ class PierlineGame {
       f.y += f.vy * dt;
       f.life -= dt;
       if (f.life <= 0) this.floats.splice(i, 1);
+    }
+
+    // Animated nocturnal shooting stars / astral meteors
+    const isNightish = this.timeOfDay < 0.22 || this.timeOfDay > 0.76;
+    const meteorRate = map.id === 'sanctuary' ? 0.52 : map.id === 'fjord' ? 0.24 : 0.28;
+    if (isNightish && this.shootingStars.length < 3 && Math.random() < dt * meteorRate) {
+      const meteorColors =
+        map.id === 'sanctuary' ? ['#f9a8d4', '#5eead4', '#fef08a'] :
+        map.id === 'abyss' ? ['#fdba74', '#fef08a'] :
+        map.id === 'fjord' ? ['#a7f3d0', '#bae6fd'] :
+        ['#fef9c3', '#e0f2fe'];
+      this.shootingStars.push({
+        x: rand(this.vw * 0.22, this.vw * 0.94),
+        y: rand(4, Math.max(10, this.waterY * 0.42)),
+        vx: -rand(58, 92),
+        vy: rand(18, 34),
+        life: rand(0.45, 0.78),
+        maxLife: 0.78,
+        color: meteorColors[Math.floor(Math.random() * meteorColors.length)],
+      });
+    }
+    for (let i = this.shootingStars.length - 1; i >= 0; i--) {
+      const st = this.shootingStars[i];
+      st.x += st.vx * dt;
+      st.y += st.vy * dt;
+      st.life -= dt;
+      if (st.life <= 0 || st.y >= this.waterY - 4 || st.x < -16) {
+        this.shootingStars.splice(i, 1);
+      }
     }
 
     // Fishing state machine

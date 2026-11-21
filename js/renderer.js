@@ -1,6 +1,7 @@
-// Crisp 16-bit 2D pixel-art side-POV renderer supporting 4 distinct fishing maps & rich animations.
+// Crisp 16-bit 2D pixel-art side-POV renderer supporting 5 distinct fishing maps, rich night variations & zero-blur bitmap text.
 import { getMapById } from './maps.js';
 import { renderArticulatedAngler } from './anglerRenderer.js';
+import { drawPixelText } from './pixelFont.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -83,6 +84,18 @@ function getCelestialState(g) {
   return { sunX, sunY, sunVisible, moonX, moonY, moonVisible };
 }
 
+// Crisp circular pixel-art halo (zero blocky rectangular glow boxes!)
+function drawPixelHalo(ctx, cx, cy, r, color, alpha) {
+  if (alpha <= 0.005 || r <= 0) return;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = alpha;
+  const rr = r * r;
+  for (let dy = -r; dy <= r; dy++) {
+    const span = Math.floor(Math.sqrt(Math.max(0, rr - dy * dy)));
+    if (span >= 0) ctx.fillRect(cx - span, cy + dy, span * 2 + 1, 1);
+  }
+}
+
 export function renderGameWorld(g, ctx) {
   ctx.imageSmoothingEnabled = false;
   ctx.save();
@@ -124,40 +137,108 @@ function renderSky(g, ctx, map, pal, cel) {
     }
   }
 
-  // Shimmering Aurora Borealis curtains in Frost Fjord
-  if (map.id === 'fjord' && pal.night > 0.2) {
+  // Map-specific animated night sky atmospheres!
+  if (map.id === 'fjord' && pal.night > 0.16) {
+    // Dual-layer sweeping Northern Lights (Aurora Borealis) curtains!
     ctx.save();
-    for (let x = 0; x < g.vw; x += 3) {
-      const wave = Math.sin(x * 0.045 + g.time * 0.9) * 7 + Math.cos(x * 0.09 - g.time * 0.6) * 4;
-      const topY = Math.round(8 + wave);
-      const colH = Math.round(14 + Math.sin(x * 0.07 + g.time * 1.4) * 5);
-      ctx.globalAlpha = pal.night * 0.24;
+    for (let x = 0; x < g.vw; x += 2) {
+      const w1 = Math.sin(x * 0.038 + g.time * 0.85) * 7 + Math.cos(x * 0.082 - g.time * 0.55) * 4;
+      const top1 = Math.round(7 + w1);
+      const h1 = Math.round(15 + Math.sin(x * 0.065 + g.time * 1.3) * 6);
+      const shimmer = 0.65 + 0.35 * Math.sin(x * 0.14 + g.time * 2.4);
+      ctx.globalAlpha = pal.night * 0.28 * shimmer;
       ctx.fillStyle = '#34d399';
-      ctx.fillRect(x, topY, 2, colH);
-      ctx.globalAlpha = pal.night * 0.16;
-      ctx.fillStyle = '#a78bfa';
-      ctx.fillRect(x, topY - 4, 2, 6);
+      ctx.fillRect(x, top1, 2, h1);
+      ctx.globalAlpha = pal.night * 0.22 * shimmer;
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(x, top1 + Math.floor(h1 * 0.45), 2, Math.max(4, Math.floor(h1 * 0.55)));
+      ctx.globalAlpha = pal.night * 0.18 * shimmer;
+      ctx.fillStyle = '#c084fc';
+      ctx.fillRect(x, top1 - 5, 2, 7);
     }
+    ctx.restore();
+  } else if (map.id === 'sanctuary' && pal.night > 0.16) {
+    // Cosmic Rose-Aqua Astral Nebula & Celestial Aurora ribbons!
+    ctx.save();
+    for (let x = 0; x < g.vw; x += 2) {
+      const w1 = Math.sin(x * 0.032 - g.time * 0.7) * 6 + Math.cos(x * 0.07 + g.time * 0.45) * 3;
+      const topY = Math.round(8 + w1);
+      const h1 = Math.round(13 + Math.sin(x * 0.055 + g.time * 1.15) * 5);
+      const shimmer = 0.68 + 0.32 * Math.sin(x * 0.12 - g.time * 2.0);
+      ctx.globalAlpha = pal.night * 0.24 * shimmer;
+      ctx.fillStyle = '#f472b6';
+      ctx.fillRect(x, topY, 2, Math.floor(h1 * 0.65));
+      ctx.globalAlpha = pal.night * 0.22 * shimmer;
+      ctx.fillStyle = '#2dd4bf';
+      ctx.fillRect(x, topY + Math.floor(h1 * 0.5), 2, Math.floor(h1 * 0.65));
+      ctx.globalAlpha = pal.night * 0.14 * shimmer;
+      ctx.fillStyle = '#a78bfa';
+      ctx.fillRect(x, topY - 4, 2, 5);
+    }
+    // Delicate constellation thread connecting bright sanctuary stars
+    ctx.globalAlpha = pal.night * 0.18;
+    const cPts = [
+      [Math.round(g.vw * 0.16), Math.round(skyH * 0.24)],
+      [Math.round(g.vw * 0.26), Math.round(skyH * 0.16)],
+      [Math.round(g.vw * 0.36), Math.round(skyH * 0.26)],
+      [Math.round(g.vw * 0.44), Math.round(skyH * 0.14)],
+    ];
+    for (let i = 0; i < cPts.length - 1; i++) {
+      drawPixelLine(ctx, cPts[i][0], cPts[i][1], cPts[i + 1][0], cPts[i + 1][1], '#e9d5ff');
+    }
+    ctx.restore();
+  } else if (map.id === 'abyss' && pal.night > 0.25) {
+    // Volcanic horizon heat-glow pulsing softly across the dark caldera sky
+    ctx.save();
+    const glowPulse = 0.14 + 0.08 * Math.sin(g.time * 2.8);
+    ctx.globalAlpha = pal.night * glowPulse;
+    ctx.fillStyle = '#ea580c';
+    ctx.fillRect(Math.round(g.vw * 0.45), Math.max(0, skyH - 22), Math.round(g.vw * 0.55), 22);
+    ctx.globalAlpha = pal.night * glowPulse * 0.65;
+    ctx.fillStyle = '#f97316';
+    ctx.fillRect(Math.round(g.vw * 0.58), Math.max(0, skyH - 12), Math.round(g.vw * 0.42), 12);
     ctx.restore();
   }
 
-  // Twinkling stars
+  // Rich multi-hue twinkling starfield
   if (pal.night > 0.15) {
     for (const s of g.stars) {
-      const twinkle = 0.5 + 0.5 * Math.sin(g.time * 3.1 + s.phase);
-      if (twinkle * pal.night < 0.25) continue;
-      ctx.fillStyle = s.bright ? '#fef9c3' : '#cbd5e1';
+      const twinkle = 0.45 + 0.55 * Math.sin(g.time * 3.1 + s.phase);
+      if (twinkle * pal.night < 0.24) continue;
+      ctx.fillStyle = s.tint || (s.bright ? '#fef9c3' : '#cbd5e1');
       ctx.globalAlpha = clamp(twinkle * pal.night, 0, 1);
       const sx = Math.round(s.x * g.vw);
-      const sy = Math.round(s.y * (skyH - 14));
+      const sy = Math.round(s.y * (skyH - 12));
       ctx.fillRect(sx, sy, 1, 1);
-      if (s.bright && twinkle > 0.85) {
-        ctx.globalAlpha *= 0.45;
+      if (s.bright && twinkle > 0.80) {
+        ctx.globalAlpha *= 0.5;
         ctx.fillRect(sx - 1, sy, 3, 1);
         ctx.fillRect(sx, sy - 1, 1, 3);
       }
     }
     ctx.globalAlpha = 1;
+  }
+
+  // Animated nocturnal shooting stars / astral meteors with crisp pixel tails!
+  if (pal.night > 0.25 && g.shootingStars && g.shootingStars.length) {
+    ctx.save();
+    for (const st of g.shootingStars) {
+      const fade = clamp(st.life / st.maxLife, 0, 1) * pal.night;
+      const sx = Math.round(st.x);
+      const sy = Math.round(st.y);
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx, sy, 2, 1);
+      // 5-step tapering glowing meteor trail
+      for (let seg = 1; seg <= 6; seg++) {
+        ctx.globalAlpha = fade * (1 - seg / 7) * 0.85;
+        ctx.fillStyle = seg <= 2 ? st.color : '#93c5fd';
+        const tx = Math.round(st.x - (st.vx * 0.016) * seg * 1.4);
+        const ty = Math.round(st.y - (st.vy * 0.016) * seg * 1.4);
+        if (ty >= 0 && ty < skyH - 2) ctx.fillRect(tx, ty, 1, 1);
+      }
+    }
+    ctx.restore();
   }
 
   // Pixel sun (tinted crimson-amber in Ember Caldera)
@@ -178,14 +259,44 @@ function renderSky(g, ctx, map, pal, cel) {
     ctx.fillRect(cel.sunX - 2, cel.sunY - 2, 4, 4);
   }
 
-  // Crisp crescent moon matching sky band
+  // Upgraded atmospheric Pixel Moon with soft stepped halo & biome tint!
   if (cel.moonVisible && pal.night > 0.1) {
     const moonBand = clamp(Math.floor(cel.moonY / Math.max(1, bandH)), 0, 3);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(cel.moonX - 3, cel.moonY - 2, 6, 5);
-    ctx.fillRect(cel.moonX - 2, cel.moonY - 3, 4, 7);
-    ctx.fillStyle = pal.sky[moonBand];
-    ctx.fillRect(cel.moonX, cel.moonY - 2, 3, 4);
+    const haloCol =
+      map.id === 'abyss' ? '#fb923c' :
+      map.id === 'sanctuary' ? '#f9a8d4' :
+      map.id === 'lagoon' ? '#67e8f9' :
+      '#bae6fd';
+    const moonCore =
+      map.id === 'abyss' ? '#fed7aa' :
+      map.id === 'sanctuary' ? '#fdf2f8' :
+      '#f8fafc';
+
+    // Smooth circular pixel-art moon halo (zero square box!)
+    ctx.save();
+    drawPixelHalo(ctx, cel.moonX, cel.moonY, 9, haloCol, pal.night * 0.10);
+    drawPixelHalo(ctx, cel.moonX, cel.moonY, 6, haloCol, pal.night * 0.16);
+    drawPixelHalo(ctx, cel.moonX, cel.moonY, 4, moonCore, pal.night * 0.22);
+    ctx.restore();
+
+    if (map.id === 'sanctuary' || map.id === 'abyss') {
+      // Full luminous Astral / Blood-Amber Moon with subtle crater shading
+      ctx.fillStyle = map.id === 'abyss' ? '#f97316' : '#f5d0fe';
+      ctx.fillRect(cel.moonX - 3, cel.moonY - 2, 7, 5);
+      ctx.fillRect(cel.moonX - 2, cel.moonY - 3, 5, 7);
+      ctx.fillStyle = moonCore;
+      ctx.fillRect(cel.moonX - 2, cel.moonY - 2, 5, 5);
+      ctx.fillStyle = map.id === 'abyss' ? '#fdba74' : '#e2e8f0';
+      ctx.fillRect(cel.moonX + 1, cel.moonY, 1, 1);
+      ctx.fillRect(cel.moonX - 1, cel.moonY + 1, 1, 1);
+    } else {
+      // Crisp glowing crescent moon with subtle shadow rim
+      ctx.fillStyle = moonCore;
+      ctx.fillRect(cel.moonX - 3, cel.moonY - 2, 6, 5);
+      ctx.fillRect(cel.moonX - 2, cel.moonY - 3, 4, 7);
+      ctx.fillStyle = pal.sky[moonBand];
+      ctx.fillRect(cel.moonX, cel.moonY - 2, 3, 4);
+    }
   }
 
   // Drifting pixel clouds
@@ -219,11 +330,28 @@ function renderHorizon(g, ctx, map, pal) {
       if (peak > 15) {
         ctx.fillStyle = lerpColor('#e2f1ff', '#7b99bd', pal.night);
         ctx.fillRect(x, wy - peak, 2, Math.min(5, peak - 13));
+        // Soft emerald-cyan aurora rim glint on snowy peaks at night!
+        if (pal.night > 0.35 && ((x + Math.floor(g.time * 4)) % 6 === 0)) {
+          ctx.save();
+          ctx.globalAlpha = pal.night * 0.35;
+          ctx.fillStyle = '#6ee7b7';
+          ctx.fillRect(x, wy - peak, 2, 1);
+          ctx.restore();
+        }
       }
     }
     const berg = g.sprites.props.iceberg;
     const bx = g.vw - (g.isPortrait ? 42 : 74);
     ctx.drawImage(berg, bx, wy - berg.height + 2);
+    if (pal.night > 0.3) {
+      // Shimmering aurora edge highlight along iceberg ridge
+      ctx.save();
+      ctx.globalAlpha = pal.night * (0.28 + 0.14 * Math.sin(g.time * 2.6));
+      ctx.fillStyle = '#5eead4';
+      ctx.fillRect(bx + 6, wy - berg.height + 3, 5, 1);
+      ctx.fillRect(bx + 14, wy - berg.height + 6, 4, 1);
+      ctx.restore();
+    }
     return;
   }
 
@@ -237,9 +365,32 @@ function renderHorizon(g, ctx, map, pal) {
     const arch = g.sprites.props.sunkenArch;
     const ax = g.vw - (g.isPortrait ? 44 : 78);
     const ay = wy - arch.height + 2;
+    // At night, the Sunken Archway awakens with a pulsing vertical starlight pillar & rising astral runes!
+    if (pal.night > 0.25) {
+      ctx.save();
+      const beamPulse = 0.7 + 0.3 * Math.sin(g.time * 3.4);
+      ctx.globalAlpha = pal.night * 0.14 * beamPulse;
+      ctx.fillStyle = '#5eead4';
+      ctx.fillRect(ax + 11, 2, 6, ay + 8);
+      ctx.globalAlpha = pal.night * 0.22 * beamPulse;
+      ctx.fillStyle = '#f9a8d4';
+      ctx.fillRect(ax + 13, 6, 2, ay + 4);
+      // Rising 1px glowing arcane rune motes ascending from the archway
+      for (let i = 0; i < 5; i++) {
+        const lift = ((g.time * 9 + i * 7.5) % 34);
+        const rx = ax + 13 + Math.round(Math.sin(g.time * 3 + i * 1.9) * 4);
+        const ry = Math.round(ay + 8 - lift);
+        if (ry > 2) {
+          ctx.globalAlpha = pal.night * (1 - lift / 34) * 0.9;
+          ctx.fillStyle = i % 2 === 0 ? '#5eead4' : '#fde047';
+          ctx.fillRect(rx, ry, 1, 1);
+        }
+      }
+      ctx.restore();
+    }
     // Soft aqua/rose shimmer around the floating temple crystal
     ctx.save();
-    ctx.globalAlpha = 0.22 + 0.12 * Math.sin(g.time * 3.8);
+    ctx.globalAlpha = 0.24 + 0.14 * Math.sin(g.time * 3.8);
     ctx.fillStyle = '#5eead4';
     ctx.fillRect(ax + 11, ay + 6, 6, 5);
     ctx.fillStyle = '#f9a8d4';
@@ -259,13 +410,46 @@ function renderHorizon(g, ctx, map, pal) {
     const volc = g.sprites.props.volcano;
     const vx = g.vw - (g.isPortrait ? 46 : 82);
     const vy = wy - volc.height + 2;
-    // Lava glow behind crater
+    const eruptPulse = 0.5 + 0.5 * Math.sin(g.time * 3.8);
+    // Backlit billowing volcanic smoke plume & circular crater glow at night!
     ctx.save();
-    ctx.globalAlpha = 0.25 + 0.12 * Math.sin(g.time * 4.5);
-    ctx.fillStyle = '#f97316';
-    ctx.fillRect(vx + 10, vy - 2, 12, 8);
+    drawPixelHalo(ctx, vx + 16, vy + 1, 12, '#ef4444', (0.14 + 0.10 * eruptPulse) * pal.night);
+    drawPixelHalo(ctx, vx + 16, vy + 1, 7, '#f97316', (0.24 + 0.14 * eruptPulse) * (0.65 + pal.night * 0.55));
+    // Drifting dark-ember smoke puffs rising above crater
+    for (let i = 0; i < 4; i++) {
+      const rise = (g.time * 5.5 + i * 6) % 24;
+      const sx = Math.round(vx + 13 + Math.sin(g.time * 1.6 + i) * 3 - rise * 0.2);
+      const sy = Math.round(vy - 2 - rise);
+      if (sy > 2) {
+        ctx.globalAlpha = (1 - rise / 24) * 0.38;
+        ctx.fillStyle = rise < 8 ? '#fb923c' : '#3b1d2e';
+        ctx.fillRect(sx, sy, 5, 3);
+      }
+    }
     ctx.restore();
     ctx.drawImage(volc, vx, vy);
+    // Animated lava sparks & pulsing magma veins down the caldera at night!
+    if (pal.night > 0.25) {
+      ctx.save();
+      ctx.globalAlpha = pal.night * (0.65 + 0.35 * eruptPulse);
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(vx + 15, vy + 2, 2, 1);
+      ctx.fillStyle = '#fb923c';
+      ctx.fillRect(vx + 14, vy + 4, 2, 2);
+      ctx.fillRect(vx + 16, vy + 6, 1, 2);
+      ctx.fillRect(vx + 13, vy + 8, 2, 2);
+      // Periodic volcanic fountain sparks arcing from the crater
+      for (let i = 0; i < 4; i++) {
+        const spT = (g.time * 1.4 + i * 0.43) % 1.0;
+        const dir = (i % 2 === 0 ? 1 : -1) * (2 + i * 1.5);
+        const spx = Math.round(vx + 15 + dir * spT * 3.5);
+        const spy = Math.round(vy + 1 - Math.sin(spT * Math.PI) * (7 + i * 1.5));
+        ctx.globalAlpha = pal.night * (1 - spT) * 0.95;
+        ctx.fillStyle = spT < 0.4 ? '#fef08a' : '#f97316';
+        ctx.fillRect(spx, spy, 1, 1);
+      }
+      ctx.restore();
+    }
     return;
   }
 
@@ -279,6 +463,14 @@ function renderHorizon(g, ctx, map, pal) {
     const atoll = g.sprites.props.atollIsle;
     const ax = g.vw - (g.isPortrait ? 38 : 68);
     ctx.drawImage(atoll, ax, wy - atoll.height + 2);
+    // Soft moonlit shoreline bioluminescence along the distant tropical atoll at night!
+    if (pal.night > 0.3) {
+      ctx.save();
+      ctx.globalAlpha = pal.night * (0.45 + 0.3 * Math.sin(g.time * 3.1));
+      ctx.fillStyle = '#5eead4';
+      ctx.fillRect(ax + 2, wy - 1, Math.max(8, atoll.width - 4), 1);
+      ctx.restore();
+    }
     return;
   }
 
@@ -312,23 +504,21 @@ function renderHorizon(g, ctx, map, pal) {
   const beaconPulse = 0.5 + 0.5 * Math.sin(g.time * 3.2);
   if (pal.night > 0.2) {
     ctx.save();
-    ctx.globalAlpha = pal.night * (0.35 + 0.35 * beaconPulse);
+    drawPixelHalo(ctx, isleX + 7, lhY + 3, 5, '#fef08a', pal.night * (0.26 + 0.20 * beaconPulse));
+    drawPixelHalo(ctx, isleX + 7, lhY + 3, 2, '#fef9c3', pal.night * 0.72);
+    // Continuous sweeping lighthouse searchlight beam across the moonlit bay!
+    const sweepDir = Math.cos(g.time * 1.15);
+    const beamLen = Math.round(52 * (0.45 + 0.55 * Math.abs(sweepDir)));
+    const dir = sweepDir >= 0 ? -1 : 1;
+    ctx.globalAlpha = pal.night * (0.14 + 0.12 * Math.abs(sweepDir));
     ctx.fillStyle = '#fef08a';
-    ctx.fillRect(isleX + 5, lhY + 1, 5, 4);
+    ctx.beginPath();
+    ctx.moveTo(isleX + 7, lhY + 3);
+    ctx.lineTo(isleX + 7 + dir * beamLen, lhY - 8);
+    ctx.lineTo(isleX + 7 + dir * beamLen, lhY + 13);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
-    const sweep = Math.sin(g.time * 1.35);
-    if (sweep > -0.25) {
-      ctx.save();
-      ctx.globalAlpha = pal.night * 0.24 * (sweep + 0.25);
-      ctx.fillStyle = '#fef08a';
-      ctx.beginPath();
-      ctx.moveTo(isleX + 7, lhY + 3);
-      ctx.lineTo(isleX - 48, lhY - 9);
-      ctx.lineTo(isleX - 48, lhY + 13);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
   }
 }
 
@@ -398,6 +588,53 @@ function renderUnderwaterBg(g, ctx, map, pal) {
     ctx.restore();
   }
 
+  // Nocturnal underwater moonbeams, bioluminescent plankton currents & arcane deep shimmer!
+  if (pal.night > 0.22) {
+    ctx.save();
+    // Soft moonbeams piercing downward in clear nocturnal waters
+    const nightBeamCol =
+      map.id === 'lagoon' ? '#5eead4' :
+      map.id === 'fjord' ? '#6ee7b7' :
+      map.id === 'abyss' ? '#fb923c' :
+      map.id === 'sanctuary' ? '#f9a8d4' :
+      '#93c5fd';
+    ctx.fillStyle = nightBeamCol;
+    for (let i = 0; i < 3; i++) {
+      const rx = Math.round(g.pierEndX + 24 + i * ((g.vw - g.pierEndX - 30) / 2.6) + Math.sin(g.time * 0.55 + i * 2.0) * 6);
+      const rayH = Math.round(h * 0.62);
+      const pulse = 0.65 + 0.35 * Math.sin(g.time * 1.6 + i * 1.7);
+      ctx.globalAlpha = pal.night * (map.id === 'sanctuary' || map.id === 'lagoon' ? 0.095 : 0.065) * pulse;
+      for (let dy = 3; dy < rayH; dy += 3) {
+        const shift = Math.round(dy * 0.18);
+        const w = Math.max(2, Math.round(8 - dy * 0.04));
+        ctx.fillRect(rx + shift, wy + dy, w, 2);
+      }
+    }
+
+    // Coral Lagoon: swirling electric-aqua bioluminescent plankton ribbon!
+    if (map.id === 'lagoon') {
+      for (let i = 0; i < 24; i++) {
+        const px = Math.round(((i * 19 + g.time * (6 + (i % 4) * 1.5)) % Math.max(20, g.vw - g.pierEndX)) + g.pierEndX);
+        const py = Math.round(wy + 7 + (i % 5) * 9 + Math.sin(g.time * 2.3 + i * 0.9) * 4);
+        const glow = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(g.time * 4.2 + i * 1.3));
+        ctx.globalAlpha = pal.night * glow * 0.85;
+        ctx.fillStyle = i % 3 === 0 ? '#a7f3d0' : '#2dd4bf';
+        ctx.fillRect(px, py, 1, 1);
+      }
+    } else if (map.id === 'sanctuary') {
+      // Astral Ruins: drifting starlight motes & faint vertical arcane filaments rising from the seabed
+      for (let i = 0; i < 20; i++) {
+        const px = Math.round(g.pierEndX + 10 + ((i * 29 + g.time * 3.5) % Math.max(20, g.vw - g.pierEndX - 16)));
+        const lift = (g.time * (5 + (i % 3) * 2) + i * 13) % Math.max(16, h - 18);
+        const py = Math.round(g.vh - 14 - lift);
+        ctx.globalAlpha = pal.night * (1 - lift / Math.max(16, h - 18)) * 0.78;
+        ctx.fillStyle = i % 3 === 0 ? '#f9a8d4' : i % 3 === 1 ? '#5eead4' : '#fde047';
+        ctx.fillRect(px, py, 1, 1);
+      }
+    }
+    ctx.restore();
+  }
+
   // Gently drifting translucent marine snow / plankton motes
   ctx.save();
   ctx.fillStyle = map.id === 'abyss' ? '#fca5a5' : map.id === 'sanctuary' ? '#f9a8d4' : '#e0f7ff';
@@ -409,20 +646,37 @@ function renderUnderwaterBg(g, ctx, map, pal) {
   }
   ctx.restore();
 
-  // Biome-specific background seabed landmarks
+  // Biome-specific background seabed landmarks (with glowing nocturnal effects!)
   const leftSpotX = Math.round(g.pierEndX + (g.vw - g.pierEndX) * 0.28);
   const rightSpotX = Math.round(g.pierEndX + (g.vw - g.pierEndX) * 0.74);
   if (map.id === 'lagoon') {
     const clam = g.sprites.props.giantClam;
-    ctx.drawImage(clam, leftSpotX, g.getSeabedY(leftSpotX + 6) - clam.height + 2);
+    const cy = g.getSeabedY(leftSpotX + 6) - clam.height + 2;
+    if (pal.night > 0.25) {
+      // Pulsing bioluminescent pearl-aqua clam glow at night
+      ctx.save();
+      ctx.globalAlpha = pal.night * (0.24 + 0.14 * Math.sin(g.time * 3.4));
+      ctx.fillStyle = '#5eead4';
+      ctx.fillRect(leftSpotX + 1, cy - 3, clam.width - 2, clam.height + 2);
+      ctx.restore();
+    }
+    ctx.drawImage(clam, leftSpotX, cy);
     if (g.vw > 210) {
       const chest = g.sprites.props.chest;
       ctx.drawImage(chest, rightSpotX, g.getSeabedY(rightSpotX + 6) - chest.height + 2);
     }
   } else if (map.id === 'fjord') {
     const crys = g.sprites.props.iceCrystal;
-
-    ctx.drawImage(crys, leftSpotX, g.getSeabedY(leftSpotX + 4) - crys.height + 1);
+    const cy = g.getSeabedY(leftSpotX + 4) - crys.height + 1;
+    if (pal.night > 0.25) {
+      // Glowing glacial cyan crystal shimmer at night
+      ctx.save();
+      ctx.globalAlpha = pal.night * (0.22 + 0.14 * Math.sin(g.time * 2.9));
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(leftSpotX - 1, cy - 3, crys.width + 2, crys.height + 2);
+      ctx.restore();
+    }
+    ctx.drawImage(crys, leftSpotX, cy);
     if (g.vw > 210) {
       ctx.globalAlpha = 0.65;
       ctx.drawImage(g.sprites.props.anchor, rightSpotX, g.getSeabedY(rightSpotX) - 12);
@@ -431,18 +685,36 @@ function renderUnderwaterBg(g, ctx, map, pal) {
   } else if (map.id === 'sanctuary') {
     const pil = g.sprites.props.sunkenPillar;
     const pc = g.sprites.props.prismCrystal;
-    ctx.drawImage(pil, leftSpotX, g.getSeabedY(leftSpotX + 4) - pil.height + 2);
+    const py = g.getSeabedY(leftSpotX + 4) - pil.height + 2;
+    ctx.drawImage(pil, leftSpotX, py);
     if (g.vw > 210) {
-      ctx.drawImage(pc, rightSpotX, g.getSeabedY(rightSpotX + 5) - pc.height + 2);
+      const pcy = g.getSeabedY(rightSpotX + 5) - pc.height + 2;
+      if (pal.night > 0.22) {
+        ctx.save();
+        ctx.globalAlpha = pal.night * (0.24 + 0.16 * Math.sin(g.time * 3.6));
+        ctx.fillStyle = '#f9a8d4';
+        ctx.fillRect(rightSpotX - 1, pcy - 4, pc.width + 2, pc.height + 3);
+        ctx.globalAlpha = pal.night * 0.16;
+        ctx.fillStyle = '#5eead4';
+        ctx.fillRect(rightSpotX + 2, pcy - 14, Math.max(4, pc.width - 4), 12);
+        ctx.restore();
+      }
+      ctx.drawImage(pc, rightSpotX, pcy);
     }
   } else if (map.id === 'abyss') {
     const vent = g.sprites.props.hydroVent;
     for (const vx of g.vw > 210 ? [leftSpotX, rightSpotX] : [leftSpotX]) {
       const vy = g.getSeabedY(vx + 6) - vent.height + 2;
       ctx.save();
-      ctx.globalAlpha = 0.24 + 0.14 * Math.sin(g.time * 5 + vx);
+      const vp = 0.24 + 0.16 * Math.sin(g.time * 5 + vx);
+      ctx.globalAlpha = vp * (0.85 + pal.night * 0.45);
       ctx.fillStyle = '#f97316';
-      ctx.fillRect(vx + 2, vy - 5, 10, 10);
+      ctx.fillRect(vx + 2, vy - 6, 10, 11);
+      if (pal.night > 0.3) {
+        ctx.globalAlpha = pal.night * vp * 0.65;
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(vx + 4, vy - 14, 6, 10);
+      }
       ctx.restore();
       ctx.drawImage(vent, vx, vy);
     }
@@ -566,7 +838,7 @@ function renderPierBack(g, ctx, map, pal) {
     ctx.fillRect(px, g.waterY + 1, 6, 4);
   }
 
-  // Biome-specific pier background structures & lighting!
+  // Biome-specific pier background structures & animated nocturnal lighting!
   const postX = Math.max(8, g.pierEndX - 42);
   if (map.id === 'lagoon') {
     // Lush curving coconut palm behind dock + animated tiki torch!
@@ -576,9 +848,20 @@ function renderPierBack(g, ctx, map, pal) {
     const tx = Math.max(12, g.pierEndX - 36);
     const ty = g.pierY - torch.height + 1;
     ctx.save();
-    ctx.globalAlpha = 0.22 + 0.08 * Math.sin(g.time * 8);
-    ctx.fillStyle = '#fb923c';
-    ctx.fillRect(tx - 4, ty - 3, 16, 12);
+    const tGlow = (0.20 + 0.08 * Math.sin(g.time * 8.5)) * (0.65 + pal.night * 0.55);
+    drawPixelHalo(ctx, tx + 4, ty + 3, 10, '#f97316', tGlow * 0.45);
+    drawPixelHalo(ctx, tx + 4, ty + 3, 6, '#fb923c', tGlow * 0.85);
+    // Live rising tiki flame sparks at night!
+    if (pal.night > 0.2) {
+      for (let i = 0; i < 3; i++) {
+        const rise = (g.time * 12 + i * 5.2) % 15;
+        const sx = Math.round(tx + 3 + Math.sin(g.time * 5 + i * 2) * 2.2);
+        const sy = Math.round(ty - rise);
+        ctx.globalAlpha = pal.night * (1 - rise / 15) * 0.95;
+        ctx.fillStyle = rise < 6 ? '#fef08a' : '#fb923c';
+        ctx.fillRect(sx, sy, 1, 1);
+      }
+    }
     ctx.restore();
     ctx.drawImage(torch, tx, ty);
   } else if (map.id === 'fjord') {
@@ -594,25 +877,34 @@ function renderPierBack(g, ctx, map, pal) {
     const ox = Math.max(10, g.pierEndX - 42);
     const oy = g.pierY - ob.height + 1;
     ctx.drawImage(ob, ox, oy);
-    // Subtle 1px orbiting crystal starlight motes (no rectangular glow box!)
-    ctx.fillStyle = Math.floor(g.time * 4) % 2 === 0 ? '#5eead4' : '#f9a8d4';
-    ctx.fillRect(ox + 5 + Math.round(Math.cos(g.time * 3.2) * 4), oy + 1 + Math.round(Math.sin(g.time * 3.2) * 2), 1, 1);
-    ctx.fillStyle = '#fef08a';
-    ctx.fillRect(ox + 5 + Math.round(Math.cos(g.time * 3.2 + 3.1) * 4), oy + 1 + Math.round(Math.sin(g.time * 3.2 + 3.1) * 2), 1, 1);
+    // Orbiting double-ring crystal starlight motes (brighter & richer at night — zero blocky glow box!)
+    const ringCount = pal.night > 0.3 ? 4 : 2;
+    const orbCols = ['#5eead4', '#fef08a', '#f9a8d4', '#e0f2fe'];
+    for (let i = 0; i < ringCount; i++) {
+      const ang = g.time * (i < 2 ? 3.2 : -2.4) + i * (Math.PI * 2 / ringCount);
+      const rx = i < 2 ? 4.5 : 6.5;
+      const ry = i < 2 ? 2.2 : 3.2;
+      ctx.fillStyle = orbCols[i % orbCols.length];
+      ctx.fillRect(ox + 5 + Math.round(Math.cos(ang) * rx), oy + 2 + Math.round(Math.sin(ang) * ry), 1, 1);
+    }
   } else if (map.id === 'abyss') {
-    // Roaring iron fire brazier post
+    // Roaring iron fire brazier post with rising fiery sparks
     const braz = g.sprites.props[Math.floor(g.time * 8) % 2 === 0 ? 'brazier0' : 'brazier1'];
     const bx = Math.max(10, g.pierEndX - 40);
     const by = g.pierY - braz.height + 1;
     ctx.save();
-    const fp = 0.18 + 0.06 * Math.sin(g.time * 9);
-    ctx.globalAlpha = fp * 0.55;
-    ctx.fillStyle = '#f97316';
-    ctx.fillRect(bx - 5, by - 2, 21, 10);
-    ctx.fillRect(bx - 3, by - 4, 17, 14);
-    ctx.globalAlpha = fp;
-    ctx.fillStyle = '#fde047';
-    ctx.fillRect(bx - 1, by - 1, 13, 8);
+    const fp = (0.18 + 0.08 * Math.sin(g.time * 9)) * (0.75 + pal.night * 0.45);
+    drawPixelHalo(ctx, bx + 5, by + 3, 11, '#f97316', fp * 0.48);
+    drawPixelHalo(ctx, bx + 5, by + 3, 6, '#fde047', fp * 0.85);
+    // Rising fiery brazier sparks!
+    for (let i = 0; i < 4; i++) {
+      const rise = (g.time * 14 + i * 4.5) % 18;
+      const sx = Math.round(bx + 5 + Math.sin(g.time * 4.5 + i * 1.8) * 3);
+      const sy = Math.round(by - rise);
+      ctx.globalAlpha = (1 - rise / 18) * 0.95;
+      ctx.fillStyle = rise < 7 ? '#fef08a' : '#f97316';
+      ctx.fillRect(sx, sy, 1, 1);
+    }
     ctx.restore();
     ctx.drawImage(braz, bx, by);
   } else {
@@ -640,12 +932,19 @@ function renderLanternPost(g, ctx, postX, pal, glowColor) {
 
   if (isLit) {
     ctx.save();
-    const pulse = 0.22 + 0.06 * Math.sin(g.time * 5.2);
-    ctx.globalAlpha = pal.night * pulse;
-    ctx.fillStyle = glowColor;
-    ctx.fillRect(lx - 4, ly - 3, 17, 14);
-    ctx.globalAlpha = pal.night * pulse * 0.45;
-    ctx.fillRect(lx - 10, ly - 8, 29, 24);
+    const pulse = 0.22 + 0.07 * Math.sin(g.time * 5.2);
+    drawPixelHalo(ctx, lx + 4, ly + 4, 13, glowColor, pal.night * pulse * 0.36);
+    drawPixelHalo(ctx, lx + 4, ly + 4, 8, glowColor, pal.night * pulse * 0.72);
+    drawPixelHalo(ctx, lx + 4, ly + 4, 4, '#fef9c3', pal.night * pulse * 0.55);
+    // Tiny fluttering nocturnal moths/sparkles orbiting the lit pier lantern
+    for (let m = 0; m < 2; m++) {
+      const ang = g.time * (3.6 + m * 1.4) + m * 3.1;
+      const mx = Math.round(lx + 4 + Math.cos(ang) * (5 + m * 2));
+      const my = Math.round(ly + 3 + Math.sin(ang * 1.3) * 3);
+      ctx.globalAlpha = pal.night * 0.85;
+      ctx.fillStyle = '#fef9c3';
+      ctx.fillRect(mx, my, 1, 1);
+    }
     ctx.restore();
   }
   ctx.drawImage(g.sprites.props[isLit ? litFrames[swayIdx] : 'lanternDim'], lx, ly);
@@ -740,28 +1039,38 @@ function renderFishes(g, ctx, pal) {
     // Subtle organic 1px bioluminescent / mythic starlight sparks trailing special species (no rectangular box!)
     if (f.species.id === 'leviathan' || f.species.id === 'magmaeel' || f.species.id === 'krakentitan' || f.species.id === 'celestialcarp') {
       const isMyth = f.species.id === 'krakentitan';
-      const count = isMyth ? 6 : 2;
+      const count = isMyth ? 8 : 2;
       ctx.save();
       for (let s = 0; s < count; s++) {
-        const t = g.time * 4.2 + f.phase + s * 1.55;
-        const alpha = 0.42 + 0.52 * (0.5 + 0.5 * Math.sin(t * 2.1));
+        const t = g.time * 4.4 + f.phase + s * 1.25;
+        const alpha = 0.45 + 0.52 * (0.5 + 0.5 * Math.sin(t * 2.1));
         ctx.globalAlpha = alpha;
         ctx.fillStyle = isMyth
-          ? (s % 3 === 0 ? '#f9a8d4' : s % 3 === 1 ? '#fde047' : '#5eead4')
+          ? (s % 4 === 0 ? '#f9a8d4' : s % 4 === 1 ? '#fde047' : s % 4 === 2 ? '#5eead4' : '#fef9c3')
           : f.species.id === 'celestialcarp' ? '#fde047'
           : f.species.id === 'leviathan' ? '#7dd3fc' : '#fde047';
-        const sx = Math.round(f.x - f.dir * (4 + s * 4.5) + Math.sin(t) * (isMyth ? 4.0 : 2.5));
-        const sy = Math.round(f.y + Math.cos(t * 1.35 + s) * (isMyth ? 9.5 : 3));
+        const sx = Math.round(f.x - f.dir * (2 + s * 4.0) + Math.sin(t) * (isMyth ? 4.5 : 2.5));
+        const sy = Math.round(f.y + Math.cos(t * 1.35 + s) * (isMyth ? 10.5 : 3));
         ctx.fillRect(sx, sy, 1, 1);
       }
-      // Subtle twinkling starlight cross above the Abyssal Kraken's golden crown
-      if (isMyth && Math.sin(g.time * 6.5 + f.phase) > 0.25) {
-        const cx = Math.round(f.x + f.dir * 5);
-        const cy = dy + 1;
-        ctx.globalAlpha = 0.9;
-        ctx.fillStyle = '#fef9c3';
-        ctx.fillRect(cx, cy - 1, 1, 3);
-        ctx.fillRect(cx - 1, cy, 3, 1);
+      // Twin crisp 4-point twinkling pixel stars glinting on the Abyssal Kraken's diadem crown & trailing royal tentacles
+      if (isMyth) {
+        if (Math.sin(g.time * 6.5 + f.phase) > 0.15) {
+          const cx = Math.round(f.x + f.dir * 6);
+          const cy = dy + 1;
+          ctx.globalAlpha = 0.95;
+          ctx.fillStyle = '#fef9c3';
+          ctx.fillRect(cx, cy - 1, 1, 3);
+          ctx.fillRect(cx - 1, cy, 3, 1);
+        }
+        if (Math.cos(g.time * 5.2 + f.phase) > 0.35) {
+          const tx = Math.round(f.x - f.dir * 19);
+          const ty = Math.round(f.y + 8);
+          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = '#5eead4';
+          ctx.fillRect(tx, ty - 1, 1, 3);
+          ctx.fillRect(tx - 1, ty, 3, 1);
+        }
       }
       ctx.restore();
     }
@@ -833,29 +1142,100 @@ function renderLandingFishForeground(g, ctx) {
 function renderWaterSurface(g, ctx, map, pal, cel) {
   const wy = g.waterY;
 
+  // Celestial sun/moon shimmer path across the water!
   const refX = cel.sunVisible ? cel.sunX : cel.moonVisible ? cel.moonX : null;
   if (refX !== null) {
     ctx.save();
-    const refColor = cel.sunVisible ? (map.id === 'abyss' ? '#fb923c' : '#fef08a') : '#e2e8f0';
+    const refColor = cel.sunVisible
+      ? (map.id === 'abyss' ? '#fb923c' : '#fef08a')
+      : (map.id === 'abyss' ? '#fdba74' : map.id === 'sanctuary' ? '#f9a8d4' : map.id === 'lagoon' ? '#a7f3d0' : '#e2e8f0');
     ctx.fillStyle = refColor;
-    for (let row = 0; row < 5; row++) {
+    const rows = cel.sunVisible ? 5 : 7;
+    for (let row = 0; row < rows; row++) {
       const y = wy + 1 + row * 2;
-      const spread = 12 - row * 2;
-      const shift = Math.round(Math.sin(g.time * 3.5 + row * 1.4) * 2.5);
-      ctx.globalAlpha = (cel.sunVisible ? 0.34 : 0.24 * pal.night) * (1 - row * 0.16);
+      const spread = (cel.sunVisible ? 12 : 16) - row * 2;
+      if (spread <= 1) continue;
+      const shift = Math.round(Math.sin(g.time * 3.5 + row * 1.4) * (2.5 + row * 0.35));
+      ctx.globalAlpha = (cel.sunVisible ? 0.34 : 0.38 * pal.night) * (1 - row * 0.13);
       ctx.fillRect(refX - Math.floor(spread / 2) + shift, y, spread, 1);
     }
     ctx.restore();
   }
 
+  // Nocturnal shimmering reflections on the water surface (pier lights, aurora, lighthouse, archway!)
+  if (pal.night > 0.22) {
+    ctx.save();
+    // 1) Pier light source reflection directly beneath the pier
+    const pierLightX =
+      map.id === 'lagoon' ? Math.max(15, g.pierEndX - 33) :
+      map.id === 'fjord' ? Math.max(22, g.pierEndX - 30) :
+      map.id === 'abyss' ? Math.max(15, g.pierEndX - 35) :
+      map.id === 'sanctuary' ? Math.max(15, g.pierEndX - 37) :
+      Math.max(14, g.pierEndX - 34);
+    const pierLightCol =
+      map.id === 'lagoon' ? '#fb923c' :
+      map.id === 'fjord' ? '#7dd3fc' :
+      map.id === 'abyss' ? '#f97316' :
+      map.id === 'sanctuary' ? (Math.floor(g.time * 3) % 2 === 0 ? '#5eead4' : '#f9a8d4') :
+      '#facc15';
+    ctx.fillStyle = pierLightCol;
+    for (let r = 0; r < 4; r++) {
+      const w = 10 - r * 2;
+      const sx = Math.round(pierLightX - w * 0.5 + Math.sin(g.time * 4.5 + r * 1.6) * 2);
+      ctx.globalAlpha = pal.night * (0.34 - r * 0.07);
+      ctx.fillRect(sx, wy + 2 + r * 2, w, 1);
+    }
+
+    // 2) Horizon landmark reflections
+    if (map.id === 'harbor') {
+      const isleX = g.vw - (g.isPortrait ? 38 : 64) + 6;
+      const pulse = 0.5 + 0.5 * Math.sin(g.time * 3.2);
+      ctx.fillStyle = '#fef08a';
+      for (let r = 0; r < 3; r++) {
+        ctx.globalAlpha = pal.night * (0.28 + 0.22 * pulse) * (1 - r * 0.28);
+        ctx.fillRect(isleX - 4 + Math.round(Math.sin(g.time * 3 + r) * 2), wy + 1 + r * 2, 8 - r * 2, 1);
+      }
+    } else if (map.id === 'fjord') {
+      // Emerald-aqua & violet aurora borealis reflections rippling across dark fjord waves!
+      for (let x = g.pierEndX + 6; x < g.vw - 6; x += 7) {
+        const wave = Math.sin(x * 0.045 + g.time * 1.1);
+        if (wave > -0.1) {
+          ctx.globalAlpha = pal.night * 0.22 * (wave + 0.2);
+          ctx.fillStyle = (x % 14 === 0) ? '#c084fc' : '#34d399';
+          ctx.fillRect(x + Math.round(Math.sin(g.time * 2.5 + x) * 2), wy + 3 + (x % 5), 5, 1);
+        }
+      }
+    } else if (map.id === 'sanctuary') {
+      // Arcane turquoise/rose archway shimmer reflection on the sanctuary sea!
+      const ax = g.vw - (g.isPortrait ? 44 : 78) + 14;
+      for (let r = 0; r < 5; r++) {
+        ctx.globalAlpha = pal.night * (0.34 - r * 0.055);
+        ctx.fillStyle = r % 2 === 0 ? '#5eead4' : '#f9a8d4';
+        const sw = 12 - r * 2;
+        ctx.fillRect(ax - Math.floor(sw / 2) + Math.round(Math.sin(g.time * 3.8 + r) * 2), wy + 1 + r * 2, sw, 1);
+      }
+    }
+    ctx.restore();
+  }
+
   const crestDay = map.id === 'abyss' ? '#fdba74' : map.id === 'sanctuary' ? '#f5d0fe' : map.id === 'lagoon' ? '#ccfbf1' : '#bae6fd';
-  const crestNight = map.id === 'abyss' ? '#9333ea' : map.id === 'sanctuary' ? '#5eead4' : '#4a76a8';
+  const crestNight =
+    map.id === 'abyss' ? '#fb923c' :
+    map.id === 'sanctuary' ? '#5eead4' :
+    map.id === 'lagoon' ? '#2dd4bf' :
+    map.id === 'fjord' ? '#6ee7b7' :
+    '#60a5fa';
   const meniscusDay = map.id === 'abyss' ? '#ea580c' : map.id === 'sanctuary' ? '#2dd4bf' : map.id === 'lagoon' ? '#5eead4' : '#56c2db';
   const subDay = map.id === 'abyss' ? '#7c2d12' : map.id === 'lagoon' ? '#14b8a6' : '#2b88a8';
-  const foamCol = lerpColor('#f8fafc', '#82a9d1', pal.night);
+  const foamCol =
+    map.id === 'lagoon' && pal.night > 0.35
+      ? lerpColor('#f8fafc', '#67e8f9', pal.night)
+      : map.id === 'sanctuary' && pal.night > 0.35
+        ? lerpColor('#f8fafc', '#f5d0fe', pal.night)
+        : lerpColor('#f8fafc', '#93c5fd', pal.night);
 
   const crestCol = lerpColor(crestDay, crestNight, pal.night);
-  const menCol = lerpColor(meniscusDay, '#2e5782', pal.night);
+  const menCol = lerpColor(meniscusDay, map.id === 'lagoon' ? '#0d9488' : '#2e5782', pal.night);
   const subCol = lerpColor(subDay, '#1e3e61', pal.night);
 
   // Dual-harmonic animated surface waves with backlit underside meniscus & glinting crests
@@ -874,10 +1254,15 @@ function renderWaterSurface(g, ctx, map, pal, cel) {
     ctx.fillStyle = subCol;
     ctx.fillRect(x, y0 + 2, 1, 1);
 
-    // Moving whitecap glints on wave peaks
-    if (w1 + w2 > 0.95 && ((x + Math.floor(g.time * 6)) % 5 === 0)) {
+    // Moving whitecap / bioluminescent glints on wave peaks!
+    if (w1 + w2 > 0.90 && ((x + Math.floor(g.time * 6)) % 5 === 0)) {
       ctx.fillStyle = foamCol;
       ctx.fillRect(x, y0, 2, 1);
+      // Extra electric-aqua bioluminescent glow crest in Coral Lagoon at night!
+      if (map.id === 'lagoon' && pal.night > 0.35) {
+        ctx.fillStyle = '#a7f3d0';
+        ctx.fillRect(x, y0 + 1, 1, 1);
+      }
     }
   }
 
@@ -1008,15 +1393,23 @@ function renderEffects(g, ctx, map, pal) {
     }
   }
 
-  // Nighttime fireflies in Harbor & Lagoon
-  if ((map.id === 'harbor' || map.id === 'lagoon') && pal.night > 0.35 && g.fireflies) {
+  // Glowing pulsing fireflies in Harbor & Lagoon at night (with delicate 1px cross halo!)
+  if ((map.id === 'harbor' || map.id === 'lagoon') && pal.night > 0.25 && g.fireflies) {
     for (const ff of g.fireflies) {
-      const pulse = 0.35 + 0.65 * Math.sin(g.time * 4.2 + ff.phase);
+      const pulse = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(g.time * 4.2 + ff.phase));
       ctx.save();
+      const fx = Math.round(ff.x + Math.sin(g.time * 1.4 + ff.phase) * 5.5);
+      const fy = Math.round(ff.y + Math.cos(g.time * 1.9 + ff.phase) * 3.2);
+      const coreCol = map.id === 'lagoon' ? '#a7f3d0' : '#fef08a';
+      const haloCol = map.id === 'lagoon' ? '#2dd4bf' : '#facc15';
+      if (pulse > 0.55) {
+        ctx.globalAlpha = pal.night * pulse * 0.35;
+        ctx.fillStyle = haloCol;
+        ctx.fillRect(fx - 1, fy, 3, 1);
+        ctx.fillRect(fx, fy - 1, 1, 3);
+      }
       ctx.globalAlpha = pal.night * pulse;
-      const fx = Math.round(ff.x + Math.sin(g.time * 1.4 + ff.phase) * 5);
-      const fy = Math.round(ff.y + Math.cos(g.time * 1.9 + ff.phase) * 3);
-      ctx.fillStyle = '#fef08a';
+      ctx.fillStyle = coreCol;
       ctx.fillRect(fx, fy, 1, 1);
       ctx.restore();
     }
@@ -1034,18 +1427,14 @@ function renderEffects(g, ctx, map, pal) {
   }
 
   if (g.floats.length) {
-    ctx.font = 'bold 7px monospace';
-    ctx.textAlign = 'center';
     for (const f of g.floats) {
+      ctx.save();
       ctx.globalAlpha = clamp(f.life / f.maxLife, 0, 1);
-      const fx = Math.round(clamp(f.x, 30, g.vw - 30));
+      const fx = Math.round(clamp(f.x, 38, g.vw - 38));
       const fy = Math.round(f.y);
-      ctx.fillStyle = '#0f172a';
-      ctx.fillText(f.text, fx + 1, fy + 1);
-      ctx.fillStyle = f.color;
-      ctx.fillText(f.text, fx, fy);
+      drawPixelText(ctx, f.text, fx, fy, f.color, '#090f1d', 1, 'center');
+      ctx.restore();
     }
-    ctx.globalAlpha = 1;
   }
 }
 
