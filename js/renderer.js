@@ -227,6 +227,28 @@ function renderHorizon(g, ctx, map, pal) {
     return;
   }
 
+  if (map.id === 'sanctuary') {
+    // Misty distant Atlantean monolith ridges
+    ctx.fillStyle = lerpColor('#3c5580', '#1a1d47', pal.night);
+    for (let x = 0; x < g.vw; x += 2) {
+      const mh = Math.max(3, Math.round(9 + Math.sin(x * 0.032 + 0.8) * 5 + Math.cos(x * 0.08) * 2));
+      ctx.fillRect(x, wy - mh, 2, mh);
+    }
+    const arch = g.sprites.props.sunkenArch;
+    const ax = g.vw - (g.isPortrait ? 44 : 78);
+    const ay = wy - arch.height + 2;
+    // Soft aqua/rose shimmer around the floating temple crystal
+    ctx.save();
+    ctx.globalAlpha = 0.22 + 0.12 * Math.sin(g.time * 3.8);
+    ctx.fillStyle = '#5eead4';
+    ctx.fillRect(ax + 11, ay + 6, 6, 5);
+    ctx.fillStyle = '#f9a8d4';
+    ctx.fillRect(ax + 11, ay, 5, 4);
+    ctx.restore();
+    ctx.drawImage(arch, ax, ay);
+    return;
+  }
+
   if (map.id === 'abyss') {
     // Jagged dark volcanic caldera rim
     ctx.fillStyle = '#241421';
@@ -349,7 +371,7 @@ function renderUnderwaterBg(g, ctx, map, pal) {
   // Animated underwater caustics web near surface & shimmering sunbeams
   if (pal.night < 0.78) {
     const dayStrength = 1 - pal.night;
-    const beamColor = map.id === 'abyss' ? '#fdba74' : map.id === 'lagoon' ? '#a7f3d0' : '#bae6fd';
+    const beamColor = map.id === 'abyss' ? '#fdba74' : map.id === 'sanctuary' ? '#a7f3d0' : map.id === 'lagoon' ? '#a7f3d0' : '#bae6fd';
     ctx.save();
     ctx.fillStyle = beamColor;
     // Diagonal shimmering light shafts
@@ -378,7 +400,7 @@ function renderUnderwaterBg(g, ctx, map, pal) {
 
   // Gently drifting translucent marine snow / plankton motes
   ctx.save();
-  ctx.fillStyle = map.id === 'abyss' ? '#fca5a5' : '#e0f7ff';
+  ctx.fillStyle = map.id === 'abyss' ? '#fca5a5' : map.id === 'sanctuary' ? '#f9a8d4' : '#e0f7ff';
   for (let i = 0; i < 16; i++) {
     const mx = Math.round(((i * 37 + g.time * (2.2 + (i % 3) * 0.9)) % (g.vw - 8)) + 4);
     const my = Math.round(wy + 10 + ((i * 23) % Math.max(18, h - 24)) + Math.sin(g.time * 1.5 + i) * 3);
@@ -405,6 +427,13 @@ function renderUnderwaterBg(g, ctx, map, pal) {
       ctx.globalAlpha = 0.65;
       ctx.drawImage(g.sprites.props.anchor, rightSpotX, g.getSeabedY(rightSpotX) - 12);
       ctx.globalAlpha = 1;
+    }
+  } else if (map.id === 'sanctuary') {
+    const pil = g.sprites.props.sunkenPillar;
+    const pc = g.sprites.props.prismCrystal;
+    ctx.drawImage(pil, leftSpotX, g.getSeabedY(leftSpotX + 4) - pil.height + 2);
+    if (g.vw > 210) {
+      ctx.drawImage(pc, rightSpotX, g.getSeabedY(rightSpotX + 5) - pc.height + 2);
     }
   } else if (map.id === 'abyss') {
     const vent = g.sprites.props.hydroVent;
@@ -445,6 +474,7 @@ function renderUnderwaterBg(g, ctx, map, pal) {
       if (map.id === 'lagoon') sprName = i === 1 ? 'coralFan' : c.sprite;
       else if (map.id === 'fjord') sprName = 'iceCrystal';
       else if (map.id === 'abyss') sprName = i === 1 ? 'coralFan' : 'coral1';
+      else if (map.id === 'sanctuary') sprName = i % 2 === 0 ? 'prismCrystal' : 'sunkenPillar';
       const spr = g.sprites.props[sprName];
       ctx.drawImage(spr, c.x, g.getSeabedY(c.x + 4) - spr.height + 1);
     }
@@ -507,10 +537,11 @@ function renderPierBack(g, ctx, map, pal) {
   const isBasalt = map.dockStyle === 'basalt';
   const isBamboo = map.dockStyle === 'bamboo';
   const isFrost = map.dockStyle === 'frost';
+  const isMarble = map.dockStyle === 'marble';
 
   // Diagonal cross-braces
-  const braceDark = isBasalt ? '#1f1d29' : isBamboo ? '#5c431f' : '#472a14';
-  const braceMid = isBasalt ? '#373445' : isBamboo ? '#8a6933' : '#5e381c';
+  const braceDark = isMarble ? '#3a4663' : isBasalt ? '#1f1d29' : isBamboo ? '#5c431f' : '#472a14';
+  const braceMid = isMarble ? '#6f82a8' : isBasalt ? '#373445' : isBamboo ? '#8a6933' : '#5e381c';
   for (let i = 0; i < pilings.length - 1; i++) {
     drawPixelLine(ctx, pilings[i] + 4, g.pierY + 4, pilings[i + 1], g.waterY - 2, braceDark);
     drawPixelLine(ctx, pilings[i] + 4, g.pierY + 5, pilings[i + 1], g.waterY - 1, braceMid);
@@ -518,11 +549,11 @@ function renderPierBack(g, ctx, map, pal) {
 
   for (const px of pilings) {
     const bottom = g.getSeabedY(px) + 2;
-    ctx.fillStyle = isBasalt ? '#1b1924' : isBamboo ? '#6b4e22' : '#472914';
+    ctx.fillStyle = isMarble ? '#435070' : isBasalt ? '#1b1924' : isBamboo ? '#6b4e22' : '#472914';
     ctx.fillRect(px, g.pierY + 3, 6, g.waterY - g.pierY - 3);
-    ctx.fillStyle = isBasalt ? '#383447' : isBamboo ? '#a88342' : '#7d4e29';
+    ctx.fillStyle = isMarble ? '#a9bed9' : isBasalt ? '#383447' : isBamboo ? '#a88342' : '#7d4e29';
     ctx.fillRect(px + 1, g.pierY + 3, 3, g.waterY - g.pierY - 3);
-    ctx.fillStyle = isBasalt ? '#524d66' : isBamboo ? '#cfa65d' : '#9c6638';
+    ctx.fillStyle = isMarble ? '#e8f3ff' : isBasalt ? '#524d66' : isBamboo ? '#cfa65d' : '#9c6638';
     ctx.fillRect(px + 1, g.pierY + 3, 1, g.waterY - g.pierY - 3);
     ctx.fillStyle = '#140c08';
     ctx.fillRect(px, g.pierY + 4, 6, 2);
@@ -531,7 +562,7 @@ function renderPierBack(g, ctx, map, pal) {
     ctx.fillRect(px, g.waterY, 6, bottom - g.waterY);
     ctx.fillStyle = '#334252';
     ctx.fillRect(px + 1, g.waterY, 3, bottom - g.waterY);
-    ctx.fillStyle = isFrost ? '#7dd3fc' : isBasalt ? '#7a3366' : '#2a6f56';
+    ctx.fillStyle = isMarble ? '#2dd4bf' : isFrost ? '#7dd3fc' : isBasalt ? '#7a3366' : '#2a6f56';
     ctx.fillRect(px, g.waterY + 1, 6, 4);
   }
 
@@ -557,6 +588,17 @@ function renderPierBack(g, ctx, map, pal) {
       ctx.drawImage(pine, 2, g.pierY - pine.height + 1);
     }
     renderLanternPost(g, ctx, Math.max(16, g.pierEndX - 38), pal, '#7dd3fc');
+  } else if (map.id === 'sanctuary') {
+    // Glowing Atlantean crystal shrine obelisk on the marble pier
+    const ob = g.sprites.props[Math.floor(g.time * 2.5) % 2 === 0 ? 'runeObelisk0' : 'runeObelisk1'];
+    const ox = Math.max(10, g.pierEndX - 42);
+    const oy = g.pierY - ob.height + 1;
+    ctx.drawImage(ob, ox, oy);
+    // Subtle 1px orbiting crystal starlight motes (no rectangular glow box!)
+    ctx.fillStyle = Math.floor(g.time * 4) % 2 === 0 ? '#5eead4' : '#f9a8d4';
+    ctx.fillRect(ox + 5 + Math.round(Math.cos(g.time * 3.2) * 4), oy + 1 + Math.round(Math.sin(g.time * 3.2) * 2), 1, 1);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(ox + 5 + Math.round(Math.cos(g.time * 3.2 + 3.1) * 4), oy + 1 + Math.round(Math.sin(g.time * 3.2 + 3.1) * 2), 1, 1);
   } else if (map.id === 'abyss') {
     // Roaring iron fire brazier post
     const braz = g.sprites.props[Math.floor(g.time * 8) % 2 === 0 ? 'brazier0' : 'brazier1'];
@@ -613,20 +655,21 @@ function renderPierFront(g, ctx, map, pal) {
   const isBasalt = map.dockStyle === 'basalt';
   const isBamboo = map.dockStyle === 'bamboo';
   const isFrost = map.dockStyle === 'frost';
+  const isMarble = map.dockStyle === 'marble';
 
-  ctx.fillStyle = isBasalt ? '#11101a' : '#29160a';
+  ctx.fillStyle = isMarble ? '#26304d' : isBasalt ? '#11101a' : '#29160a';
   ctx.fillRect(0, g.pierY - 1, g.pierEndX + 3, 6);
-  ctx.fillStyle = isFrost ? '#eef7ff' : isBasalt ? '#5b5570' : isBamboo ? '#d9b36c' : '#b87a42';
+  ctx.fillStyle = isMarble ? '#eef7ff' : isFrost ? '#eef7ff' : isBasalt ? '#5b5570' : isBamboo ? '#d9b36c' : '#b87a42';
   ctx.fillRect(0, g.pierY, g.pierEndX + 2, 1);
-  ctx.fillStyle = isFrost ? '#cbd5e1' : isBasalt ? '#3c384d' : isBamboo ? '#b58e4a' : '#945d2e';
+  ctx.fillStyle = isMarble ? '#b4c9e4' : isFrost ? '#cbd5e1' : isBasalt ? '#3c384d' : isBamboo ? '#b58e4a' : '#945d2e';
   ctx.fillRect(0, g.pierY + 1, g.pierEndX + 2, 2);
-  ctx.fillStyle = isBasalt ? '#252233' : isBamboo ? '#7d5c29' : '#633a1b';
+  ctx.fillStyle = isMarble ? '#6f84ab' : isBasalt ? '#252233' : isBamboo ? '#7d5c29' : '#633a1b';
   ctx.fillRect(0, g.pierY + 3, g.pierEndX + 2, 2);
 
   for (let x = 6; x < g.pierEndX + 1; x += 8) {
     ctx.fillStyle = isBasalt ? '#171521' : '#331c0d';
     ctx.fillRect(x, g.pierY, 1, 5);
-    ctx.fillStyle = isBamboo ? '#f5cf6b' : '#475569';
+    ctx.fillStyle = isMarble ? '#facc15' : isBamboo ? '#f5cf6b' : '#475569';
     ctx.fillRect(x - 2, g.pierY + 1, 1, 1);
   }
 
@@ -693,17 +736,21 @@ function renderFishes(g, ctx, pal) {
 
     ctx.drawImage(img, dx, dy);
 
-    // Subtle organic 1px bioluminescent sparks trailing special species (no rectangular box!)
-    if (f.species.id === 'leviathan' || f.species.id === 'magmaeel') {
-      const sparkColor = f.species.id === 'leviathan' ? '#7dd3fc' : '#fde047';
+    // Subtle organic 1px bioluminescent / mythic starlight sparks trailing special species (no rectangular box!)
+    if (f.species.id === 'leviathan' || f.species.id === 'magmaeel' || f.species.id === 'krakentitan' || f.species.id === 'celestialcarp') {
+      const isMyth = f.species.id === 'krakentitan';
+      const count = isMyth ? 4 : 2;
       ctx.save();
-      ctx.fillStyle = sparkColor;
-      for (let s = 0; s < 2; s++) {
-        const t = g.time * 4.5 + f.phase + s * 3.1;
-        const alpha = 0.35 + 0.5 * (0.5 + 0.5 * Math.sin(t * 2));
+      for (let s = 0; s < count; s++) {
+        const t = g.time * 4.5 + f.phase + s * 2.1;
+        const alpha = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(t * 2));
         ctx.globalAlpha = alpha;
-        const sx = Math.round(f.x - f.dir * (6 + s * 5) + Math.sin(t) * 2);
-        const sy = Math.round(f.y + Math.cos(t * 1.3 + s) * 3);
+        ctx.fillStyle = isMyth
+          ? (s % 3 === 0 ? '#f9a8d4' : s % 3 === 1 ? '#fde047' : '#5eead4')
+          : f.species.id === 'celestialcarp' ? '#fde047'
+          : f.species.id === 'leviathan' ? '#7dd3fc' : '#fde047';
+        const sx = Math.round(f.x - f.dir * (8 + s * 5) + Math.sin(t) * 2.5);
+        const sy = Math.round(f.y + Math.cos(t * 1.4 + s) * (isMyth ? 6 : 3));
         ctx.fillRect(sx, sy, 1, 1);
       }
       ctx.restore();
@@ -780,9 +827,9 @@ function renderWaterSurface(g, ctx, map, pal, cel) {
     ctx.restore();
   }
 
-  const crestDay = map.id === 'abyss' ? '#fdba74' : map.id === 'lagoon' ? '#ccfbf1' : '#bae6fd';
-  const crestNight = map.id === 'abyss' ? '#9333ea' : '#4a76a8';
-  const meniscusDay = map.id === 'abyss' ? '#ea580c' : map.id === 'lagoon' ? '#5eead4' : '#56c2db';
+  const crestDay = map.id === 'abyss' ? '#fdba74' : map.id === 'sanctuary' ? '#f5d0fe' : map.id === 'lagoon' ? '#ccfbf1' : '#bae6fd';
+  const crestNight = map.id === 'abyss' ? '#9333ea' : map.id === 'sanctuary' ? '#5eead4' : '#4a76a8';
+  const meniscusDay = map.id === 'abyss' ? '#ea580c' : map.id === 'sanctuary' ? '#2dd4bf' : map.id === 'lagoon' ? '#5eead4' : '#56c2db';
   const subDay = map.id === 'abyss' ? '#7c2d12' : map.id === 'lagoon' ? '#14b8a6' : '#2b88a8';
   const foamCol = lerpColor('#f8fafc', '#82a9d1', pal.night);
 

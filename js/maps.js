@@ -84,6 +84,27 @@ export const MAPS = [
       { t: 1.00, sky: ['#120814', '#241021', '#3d192b', '#632630'], water: ['#29203b', '#1b142b', '#100b1c'], night: 0.95 },
     ],
   },
+  {
+    id: 'sanctuary',
+    name: 'Astral Ruins',
+    subtitle: 'Sunken Sanctuary',
+    cost: 850,
+    desc: 'Ancient marble pier above glowing prism ruins where the mythic Abyssal Kraken dwells.',
+    accent: '#f472b6',
+    dockStyle: 'marble',
+    weather: 'starlight',
+    seabedColors: ['#7d8ba8', '#566482', '#37425c', '#21283d'],
+    kelpColors: ['#1b8a85', '#2dd4bf', '#a7f3d0'],
+    skyKeys: [
+      { t: 0.00, sky: ['#090b24', '#161742', '#262361', '#3b2d7d'], water: ['#154a63', '#122c54', '#0b1330'], night: 0.95 },
+      { t: 0.20, sky: ['#1a1a4a', '#3d2c75', '#7e4a96', '#d682b5'], water: ['#1e6e7d', '#193e66', '#0e1b3d'], night: 0.45 },
+      { t: 0.36, sky: ['#25488c', '#3c77b8', '#68b8d6', '#b8f0ec'], water: ['#229e9c', '#185c80', '#122754'], night: 0.08 },
+      { t: 0.62, sky: ['#1f3e7d', '#356ca8', '#5da8c9', '#a8e3e6'], water: ['#1e9194', '#165278', '#10234d'], night: 0.12 },
+      { t: 0.78, sky: ['#1d1847', '#4a2b78', '#96478e', '#e07ca6'], water: ['#1c6375', '#173861', '#0d193b'], night: 0.50 },
+      { t: 0.90, sky: ['#0d0f30', '#1d1c52', '#322b73', '#4d3a91'], water: ['#16506b', '#13305c', '#0c1636'], night: 0.88 },
+      { t: 1.00, sky: ['#090b24', '#161742', '#262361', '#3b2d7d'], water: ['#154a63', '#122c54', '#0b1330'], night: 0.95 },
+    ],
+  },
 ];
 
 export function getMapById(id) {

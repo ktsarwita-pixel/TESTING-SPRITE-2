@@ -155,42 +155,54 @@ export function computeAnglerRig(g) {
     // Back hand holds the tucked rod cleanly behind shoulder
     reelX = shoulderX - 4.2;
     reelY = hipY - 2.2;
+  } else if (g.state === 'IDLE') {
+    // Relaxed, natural two-hand ready grip cleanly spaced along the cork rod handle
+    gripX = shoulderX + 6.4;
+    gripY = shoulderY + 2.0;
+    reelX = gripX - cosA * 3.4;
+    reelY = gripY - sinA * 3.4 + 0.6;
   } else if (g.state === 'CHARGING') {
+    // Classic smooth two-hand casting backswing arc over the back shoulder (cleanly spaced along cork handle!)
     const p = smoothstep(clamp(g.chargePower || 0, 0, 1));
-    gripX = shoulderX + lerp(5.5, -5.8, p);
-    gripY = shoulderY + lerp(1.0, -3.2, p);
-    reelX = gripX - cosA * 2.8;
-    reelY = gripY - sinA * 2.8 + 0.8;
+    const swingAng = lerp(-0.18, -2.08, p);
+    const arcR = lerp(6.4, 5.8, p);
+    gripX = shoulderX + Math.cos(swingAng) * arcR;
+    gripY = (shoulderY + 0.4) + Math.sin(swingAng) * arcR;
+    // Lower hand stays cleanly 3.2px down the cork butt along the rod shaft!
+    reelX = gripX - cosA * 3.2;
+    reelY = gripY - sinA * 3.2;
   } else if (g.state === 'CASTING') {
     const t = smoothstep(clamp((g.castT || 0) * 2.1, 0, 1));
-    gripX = shoulderX + lerp(-5.5, 8.0, t);
-    gripY = shoulderY + lerp(-3.2, 0.4, t);
-    reelX = gripX - cosA * 2.8;
-    reelY = gripY - sinA * 2.8 + 0.8;
+    const swingAng = lerp(-2.08, 0.06, t);
+    gripX = shoulderX + Math.cos(swingAng) * 6.8;
+    gripY = (shoulderY + 0.4) + Math.sin(swingAng) * 6.0;
+    reelX = gripX - cosA * 3.2;
+    reelY = gripY - sinA * 3.2;
   } else {
-    // Ready / waiting / retrieving / bite / reeling:
+    // Waiting / retrieving / bite / reeling:
     const pullBack = g.state === 'REELING' ? (g.tension || 0) * 1.6 : 0;
     gripX = shoulderX + 6.8 - pullBack;
-    gripY = shoulderY + 1.4 - (g.state === 'BITE' ? 1.4 : 0);
+    gripY = shoulderY + 1.5 - (g.state === 'BITE' ? 1.4 : 0);
 
-    const seatX = gripX - cosA * 2.5;
-    const seatY = gripY - sinA * 2.5 + 1.6;
+    const seatX = gripX - cosA * 2.6;
+    const seatY = gripY - sinA * 2.6 + 1.5;
 
     const isCranking =
       (g.state === 'REELING' && (g.reelHold || g.devAutoLand) && !g.fishThrashing) ||
       (g.state === 'WAITING' && g.retrieving);
 
     if (isCranking) {
-      const crankR = 2.5;
+      const crankR = 2.4;
       const ca = g.crankAngle || 0;
       reelX = seatX + Math.cos(ca) * crankR;
       reelY = seatY + Math.sin(ca) * crankR;
     } else if (g.state === 'REELING' && (g.fishThrashing || g.tension > 0.72)) {
-      reelX = gripX - cosA * 4.2;
-      reelY = gripY - sinA * 4.2 + 0.4;
+      reelX = gripX - cosA * 3.8;
+      reelY = gripY - sinA * 3.8 + 0.3;
     } else {
-      reelX = seatX + 0.8;
-      reelY = seatY + 1.2;
+      // Poised neatly on the reel handle knob, clearly separated from the foregrip hand
+      reelX = seatX + 1.1;
+      reelY = seatY + 1.1;
     }
   }
 
@@ -262,22 +274,26 @@ function drawSculptedTorso(ctx, rig) {
   const hx = rig.hipX;
   const hy = rig.hipY;
 
-  // Interpolate 9 horizontal scan-slices from collar down to belt with natural shoulder->waist->hip taper!
-  const rows = [
-    // [t, halfL, halfR, kind]
-    [0.00, 2.2, 2.2, 'collar'],
-    [0.14, 3.2, 2.9, 'chest'],
-    [0.28, 3.3, 3.0, 'chest'],
-    [0.42, 3.0, 2.8, 'mid'],
-    [0.56, 2.6, 2.6, 'waist'],
-    [0.70, 2.5, 2.5, 'waist'],
-    [0.84, 2.8, 2.7, 'belt'],
-    [0.98, 2.9, 2.8, 'hip'],
-  ];
+  // Fill EVERY integer scanline from shoulder down to hip so lean/breathing NEVER creates a 1px gap!
+  const y0 = Math.round(sy);
+  const y1 = Math.round(hy);
+  const span = Math.max(1, y1 - y0);
 
-  for (const [t, hl, hr, kind] of rows) {
+  for (let cy = y0; cy <= y1; cy++) {
+    const t = (cy - y0) / span;
     const cx = lerp(sx, hx, t);
-    const cy = Math.round(lerp(sy, hy, t));
+    let hl, hr, kind;
+    if (cy === y0) {
+      hl = 2.2; hr = 2.2; kind = 'collar';
+    } else if (cy === y1) {
+      hl = 2.9; hr = 2.8; kind = 'hip';
+    } else if (cy === y1 - 1) {
+      hl = 2.8; hr = 2.7; kind = 'belt';
+    } else if (t < 0.40) {
+      hl = 3.2; hr = 2.9; kind = 'chest';
+    } else {
+      hl = 2.6; hr = 2.6; kind = 'waist';
+    }
     const xL = Math.round(cx - hl);
     const xR = Math.round(cx + hr);
     const w = Math.max(3, xR - xL + 1);
@@ -468,25 +484,27 @@ export function renderArticulatedAngler(g, ctx) {
   drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY - 1, rig.ctrlX, rig.ctrlY - 1, rig.tipX, rig.tipY - 1, rodColor, 16);
   px(ctx, rig.tipX, rig.tipY - 1, '#ffffff', 1, 1);
 
-  // Sleek silver spinning reel & rotating crank arm
+  // Sleek silver spinning reel & rotating crank arm (only connect crank arm when line is out!)
   const seatX = rig.rodHandX - rig.cosA * 2.2;
   const seatY = rig.rodHandY - rig.sinA * 2.2 + 1.4;
   px(ctx, seatX - 1, seatY, '#475569', 3, 2);
   px(ctx, seatX, seatY, '#cbd5e1', 2, 1);
   px(ctx, seatX, seatY, '#ffffff', 1, 1);
 
-  if (g.state !== 'CHARGING' && g.state !== 'CASTING' && g.state !== 'CAUGHT' && g.state !== 'LANDING') {
+  const onReel = g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING';
+  if (onReel) {
     drawPixelLineLocal(ctx, seatX, seatY + 1, rig.reelX, rig.reelY, '#e2e8f0');
   }
 
-  // Sculpted left hand gripping rod foregrip / holding fish (compact warm skin, zero giant black mitten!)
-  px(ctx, rig.gripX - 1, rig.gripY, '#b57451', 3, 2);
-  px(ctx, rig.gripX, rig.gripY, '#ffe0c4', 2, 1);
+  // Sculpted left hand gripping rod foregrip / holding fish (clean compact 2x2 hand!)
+  px(ctx, rig.gripX, rig.gripY, '#ffe0c4', 1, 1);
+  px(ctx, rig.gripX + 1, rig.gripY, '#f0b58b', 1, 1);
+  px(ctx, rig.gripX, rig.gripY + 1, '#c2815d', 2, 1);
 
-  // 8. Front arm (right cranking arm!) with sleek rolled sleeve + bare tanned forearm
+  // 8. Front arm (right arm gripping rod butt when getting ready / cranking reel when fishing!)
   const frontShoulderX = rig.shoulderX - 1.4;
   const frontShoulderY = rig.shoulderY + 0.8;
-  const frontArmBend = rig.reelX >= frontShoulderX ? 1 : -1;
+  const frontArmBend = (g.state === 'CHARGING' && rig.reelX < frontShoulderX + 0.5) ? -1 : 1;
   const frontElbow = solve2BoneIK(frontShoulderX, frontShoulderY, rig.reelX, rig.reelY, 4.9, 4.9, frontArmBend);
   // Rolled teal sleeve upper arm
   drawOrganicLimb(ctx, frontShoulderX, frontShoulderY, frontElbow.x, frontElbow.y, '#5bc9b4', '#2c8f83', '#133d3c', 2.0, 1.7);
@@ -494,10 +512,11 @@ export function renderArticulatedAngler(g, ctx) {
   px(ctx, frontElbow.x, frontElbow.y, '#f2ead9', 1, 1);
   // Warm tanned forearm
   drawOrganicLimb(ctx, frontElbow.x, frontElbow.y, rig.reelX, rig.reelY, '#ffe0c4', '#f2ba91', '#9c5d3c', 1.6, 1.3);
-  // Sculpted right hand + brass crank knob
-  px(ctx, rig.reelX - 1, rig.reelY, '#b57451', 3, 2);
-  px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
-  if (g.state !== 'CAUGHT' && g.state !== 'LANDING') {
+  // Sculpted right hand (compact 2x2 hand + subtle brass crank knob ONLY while reeling/waiting!)
+  px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 1, 1);
+  px(ctx, rig.reelX + 1, rig.reelY, '#f0b58b', 1, 1);
+  px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1);
+  if (onReel && !(g.state === 'REELING' && (g.fishThrashing || g.tension > 0.72))) {
     px(ctx, rig.reelX + 1, rig.reelY + 1, '#facc15', 1, 1);
   }
 

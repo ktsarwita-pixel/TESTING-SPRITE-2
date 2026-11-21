@@ -1,4 +1,5 @@
 import { EXTRA_FISH_SPRITES } from './fishSpritesExtra.js';
+import { SANCTUARY_FISH_SPRITES } from './fishSpritesSanctuary.js';
 
 // 12 handcrafted 16-bit fish species, each with 4 smooth swim animation frames (facing RIGHT).
 // Frame cycle: 0 = neutral, 1 = tail-up & fin-sweep, 2 = neutral-glide, 3 = tail-down & fin-sweep.
@@ -760,4 +761,4 @@ const BASE_FISH_SPRITES = {
   ]),
 };
 
-export const FISH_SPRITES = { ...BASE_FISH_SPRITES, ...EXTRA_FISH_SPRITES };
+export const FISH_SPRITES = { ...BASE_FISH_SPRITES, ...EXTRA_FISH_SPRITES, ...SANCTUARY_FISH_SPRITES };

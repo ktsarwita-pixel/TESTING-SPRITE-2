@@ -362,6 +362,18 @@ class PierlineGame {
           color: Math.random() > 0.4 ? '#fb923c' : '#fef08a',
         });
       }
+    } else if (map.weather === 'starlight') {
+      const cols = ['#f9a8d4', '#5eead4', '#fef08a', '#e9d5ff'];
+      for (let i = 0; i < 26; i++) {
+        this.weatherParticles.push({
+          x: rand(0, this.vw),
+          y: rand(4, this.waterY),
+          vx: rand(-3, 3),
+          vy: rand(-6, -2),
+          size: 1,
+          color: cols[i % cols.length],
+        });
+      }
     }
   }
 
@@ -471,6 +483,7 @@ class PierlineGame {
     const weights = list.map((sp) => {
       const baseWeight = (RARITY_META[sp.rarity] && RARITY_META[sp.rarity].weight) || 0.5;
       const rarityBoost =
+        sp.rarity === 'myth' ? Math.pow(stats.lureLuck, 2.0) :
         sp.rarity === 'legendary' ? Math.pow(stats.lureLuck, 1.7) :
         sp.rarity === 'epic' ? Math.pow(stats.lureLuck, 1.45) :
         sp.rarity === 'rare' ? Math.pow(stats.lureLuck, 1.25) :
@@ -615,7 +628,7 @@ class PierlineGame {
     this.save.unlockedMaps = MAPS.map((m) => m.id);
     this.persist();
     sound.playBuy();
-    this.setAdminStatus('ALL 4 MAPS UNLOCKED');
+    this.setAdminStatus('ALL 5 MAPS UNLOCKED');
   }
 
   adminMaxGear() {
@@ -1315,6 +1328,12 @@ class PierlineGame {
         if (wp.y < -4) {
           wp.x = rand(0, this.vw);
           wp.y = this.waterY + rand(-2, 4);
+        }
+      } else if (map.weather === 'starlight') {
+        wp.x += Math.sin(this.time * 2.2 + wp.y * 0.15) * 4 * dt;
+        if (wp.y < -4) {
+          wp.x = rand(0, this.vw);
+          wp.y = this.waterY - rand(1, 5);
         }
       }
     }

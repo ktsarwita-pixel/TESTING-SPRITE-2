@@ -125,11 +125,13 @@ class SoundEngine {
 
   playCatch(rarity = 'common') {
     const fanfare =
-      rarity === 'mythic' || rarity === 'legendary' || rarity === 'rare'
-        ? [523, 659, 784, 1046, 1318]
-        : [523, 659, 784, 1046];
+      rarity === 'myth' || rarity === 'mythic'
+        ? [523, 659, 784, 1046, 1318, 1568]
+        : rarity === 'legendary' || rarity === 'epic' || rarity === 'rare'
+          ? [523, 659, 784, 1046, 1318]
+          : [523, 659, 784, 1046];
     fanfare.forEach((f, idx) => {
-      this.tone(f, f, idx === fanfare.length - 1 ? 0.28 : 0.10, 'square', 0.075, idx * 0.085);
+      this.tone(f, f, idx === fanfare.length - 1 ? 0.34 : 0.10, 'square', 0.078, idx * 0.082);
     });
   }
 
