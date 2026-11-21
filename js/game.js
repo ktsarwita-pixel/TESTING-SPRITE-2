@@ -36,8 +36,11 @@ class PierlineGame {
     this.clouds = [];
     this.birds = [];
     this.kelp = [];
+    this.corals = [];
     this.pebbles = [];
+    this.fireflies = [];
     this.bubbles = [];
+    this.jigAnimTimer = 0;
     this.particles = [];
     this.ripples = [];
     this.floats = [];
@@ -197,8 +200,9 @@ class PierlineGame {
     this.waterY = Math.round(this.vh * (this.isPortrait ? 0.33 : 0.40));
     this.pierEndX = this.isPortrait ? 56 : Math.round(clamp(this.vw * 0.22, 66, 92));
     this.pierY = this.waterY - 12;
-    this.anglerX = this.pierEndX - 18;
-    this.anglerY = this.pierY - 21;
+    const anglerH = this.sprites.angler.idle0.h;
+    this.anglerX = this.pierEndX - 20;
+    this.anglerY = this.pierY - anglerH + 1;
 
     this.rebuildSeabedDecor();
   }
@@ -229,10 +233,10 @@ class PierlineGame {
     }
 
     this.clouds = [
-      { x: 24, y: 14, speed: 2.2, sprite: 'cloud0' },
-      { x: 118, y: 24, speed: 1.5, sprite: 'cloud1' },
-      { x: 225, y: 12, speed: 2.6, sprite: 'cloud0' },
-      { x: 310, y: 28, speed: 1.8, sprite: 'cloud1' },
+      { x: 24, y: 12, speed: 2.2, sprite: 'cloud0' },
+      { x: 118, y: 23, speed: 1.5, sprite: 'cloud1' },
+      { x: 225, y: 10, speed: 2.6, sprite: 'cloud2' },
+      { x: 310, y: 26, speed: 1.8, sprite: 'cloud0' },
     ];
 
     this.birds = [
@@ -265,6 +269,22 @@ class PierlineGame {
         dy: (i % 3) + 2,
         w: 2 + (i % 3),
         color: i % 4 === 0 ? '#d99b66' : i % 3 === 0 ? '#5c6b7a' : '#857863',
+      });
+    }
+
+    this.corals = [];
+    const coralSpots = [0.20, 0.52, 0.84];
+    coralSpots.forEach((frac, idx) => {
+      const cx = Math.round(this.pierEndX + (this.vw - this.pierEndX - 16) * frac);
+      this.corals.push({ x: cx, sprite: idx % 2 === 0 ? 'coral0' : 'coral1' });
+    });
+
+    this.fireflies = [];
+    for (let i = 0; i < 6; i++) {
+      this.fireflies.push({
+        x: Math.round(8 + (i / 6) * (this.pierEndX + 24)),
+        y: Math.round(this.pierY - 8 - (i % 3) * 10),
+        phase: i * 1.4,
       });
     }
   }
@@ -475,50 +495,63 @@ class PierlineGame {
   }
 
   getAnglerPose() {
-    if (this.state === 'CHARGING') return 'windup';
-    if (this.state === 'CASTING') return 'cast';
+    if (this.state === 'CHARGING') return this.chargePower > 0.55 ? 'windup1' : 'windup0';
+    if (this.state === 'CASTING') return this.castFlightT < 0.45 ? 'cast0' : 'cast1';
+    if (this.state === 'WAITING' && this.jigAnimTimer > 0) return 'jig';
+    if (this.state === 'BITE') return 'bite';
     if (this.state === 'REELING') {
-      if (this.pointerHeld) return Math.floor(this.time * 10) % 2 === 0 ? 'reel0' : 'reel1';
-      return 'reel0';
+      if (this.pointerHeld) {
+        const frames = ['reel0', 'reel1', 'reel2', 'reel1'];
+        return frames[Math.floor(this.time * 12) % frames.length];
+      }
+      return this.fishThrashing ? 'reel1' : 'reel0';
     }
-    if (this.state === 'LANDING' || this.state === 'CAUGHT') return 'celebrate';
-    return Math.floor(this.time * 2.1) % 2 === 0 ? 'idle0' : 'idle1';
+    if (this.state === 'LANDING' || this.state === 'CAUGHT') {
+      return Math.floor(this.time * 5.5) % 2 === 0 ? 'celebrate0' : 'celebrate1';
+    }
+    // Periodic blink & gentle 4-beat breathing / bandana flutter
+    const blinkCycle = this.time % 4.6;
+    if (blinkCycle > 4.44) return 'idleBlink';
+    const idleCycle = ['idle0', 'idle1', 'idle2', 'idle0'];
+    return idleCycle[Math.floor(this.time * 2.6) % idleCycle.length];
   }
 
   getRodTipPos() {
     const pose = this.getAnglerPose();
-    const spr = this.sprites.angler[pose];
+    const spr = this.sprites.angler[pose] || this.sprites.angler.idle0;
+    const drawY = this.pierY - spr.h + 1;
     const handX = this.anglerX + spr.hand[0];
-    const handY = this.anglerY + spr.hand[1];
+    const handY = drawY + spr.hand[1];
 
     if (this.state === 'CHARGING') {
-      const pull = this.chargePower * 7;
+      const pull = this.chargePower * 8;
       return {
         handX, handY,
-        tipX: handX - 10 - pull,
-        tipY: handY - 14 - pull * 0.4,
+        tipX: handX - 11 - pull,
+        tipY: handY - 15 - pull * 0.35,
         ctrlX: handX - 5 - pull * 0.5,
-        ctrlY: handY - 9,
+        ctrlY: handY - 10,
       };
     }
 
     if (this.state === 'LANDING' || this.state === 'CAUGHT') {
       return {
         handX, handY,
-        tipX: handX - 6,
-        tipY: handY - 16,
-        ctrlX: handX - 3,
+        tipX: handX - 8,
+        tipY: handY - 15,
+        ctrlX: handX - 4,
         ctrlY: handY - 9,
       };
     }
 
+    const jigLift = this.jigAnimTimer > 0 ? -5 : 0;
     const bend = this.rodBend;
     return {
       handX, handY,
-      tipX: handX + 18 + bend * 5,
-      tipY: handY - 14 + bend * 11,
-      ctrlX: handX + 12 + bend * 2,
-      ctrlY: handY - 13 + bend * 1.5,
+      tipX: handX + 20 + bend * 5,
+      tipY: handY - 15 + bend * 12 + jigLift,
+      ctrlX: handX + 13 + bend * 2,
+      ctrlY: handY - 14 + bend * 1.5 + jigLift * 0.5,
     };
   }
 
@@ -548,6 +581,7 @@ class PierlineGame {
 
   performJig() {
     this.jigBoost = 1.0;
+    this.jigAnimTimer = 0.26;
     this.hookDepth = Math.max(10, this.hookDepth - 7);
     this.bobberDip = -2.2;
     sound.playJig();
@@ -718,6 +752,7 @@ class PierlineGame {
     this.timeOfDay = (this.timeOfDay + dt * 0.0042) % 1;
 
     if (this.pointerHeld) this.holdDuration += dt;
+    if (this.jigAnimTimer > 0) this.jigAnimTimer = Math.max(0, this.jigAnimTimer - dt);
     if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
 
     for (const c of this.clouds) {
@@ -732,11 +767,21 @@ class PierlineGame {
       }
     }
 
-    if (Math.random() < dt * 2.2) {
-      const bx = rand(this.pierEndX + 8, this.vw - 8);
+    if (Math.random() < dt * 2.5) {
+      const fromChest = this.vw > 210 && Math.random() < 0.32;
+      const bx = fromChest
+        ? Math.round(this.pierEndX + (this.vw - this.pierEndX) * 0.74) + 7
+        : rand(this.pierEndX + 8, this.vw - 8);
       this.bubbles.push({
-        x: bx, y: this.getSeabedY(bx) - 3,
-        vy: rand(10, 18), life: rand(1.4, 3.2),
+        x: bx, y: this.getSeabedY(bx) - 4,
+        vy: rand(10, 18), life: rand(1.5, 3.4),
+      });
+    }
+    if (this.state === 'REELING' && this.tension > 0.72 && Math.random() < dt * 7) {
+      this.particles.push({
+        x: this.anglerX + rand(6, 14), y: this.anglerY + 6,
+        vx: rand(-18, -6), vy: rand(-26, -12),
+        gravity: 110, color: '#bae6fd', life: 0.35, maxLife: 0.35, size: 1,
       });
     }
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
