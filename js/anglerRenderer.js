@@ -1,51 +1,16 @@
-// Articulated 16-bit pixel-art angler renderer.
-// Renders crisp integer-pixel anatomy with locked pier-grounded boots, hinged knees,
-// leaning torso, fluttering scarf, gaze-tracking head/hat, and true 60fps two-arm rod + reel cranking!
+// Sculpted, non-blocky 16-bit/32-bit pixel-art articulated angler renderer.
+// Uses tapered selective-outlined ("selout") anatomy, chamfered organic silhouettes,
+// 2-bone IK limbs, secondary cloth physics (scarf + hat ribbon), expressive face,
+// and seamless 60fps motion across IDLE, CHARGING, CASTING, WAITING/RETRIEVING,
+// BITE, REELING, LANDING, and CAUGHT.
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (t) => t * t * (3 - 2 * t);
 
 function px(ctx, x, y, color, w = 1, h = 1) {
   ctx.fillStyle = color;
   ctx.fillRect(Math.round(x), Math.round(y), w, h);
-}
-
-// Crisp outlined 2px-thick pixel limb segment (used for legs, thighs, upper arms, forearms)
-function drawPixelLimb(ctx, x0, y0, x1, y1, mainCol, shadeCol, outlineCol = '#111622', thick = 2) {
-  const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 1.4));
-  // Pass 1: ink outline
-  ctx.fillStyle = outlineCol;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const cx = Math.round(lerp(x0, x1, t));
-    const cy = Math.round(lerp(y0, y1, t));
-    ctx.fillRect(cx - 1, cy - 1, thick + 2, thick + 2);
-  }
-  // Pass 2: inner shade & highlight
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const cx = Math.round(lerp(x0, x1, t));
-    const cy = Math.round(lerp(y0, y1, t));
-    ctx.fillStyle = shadeCol;
-    ctx.fillRect(cx, cy, thick, thick);
-    ctx.fillStyle = mainCol;
-    ctx.fillRect(cx, cy, Math.max(1, thick - 1), Math.max(1, thick - 1));
-  }
-}
-
-// 2-bone analytical IK for realistic elbow/knee bend in pixel space
-function solve2BoneIK(ax, ay, bx, by, len1, len2, bendSign = 1) {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const d = clamp(Math.hypot(dx, dy), 0.5, len1 + len2 - 0.1);
-  const a = (len1 * len1 - len2 * len2 + d * d) / (2 * d);
-  const h = Math.sqrt(Math.max(0, len1 * len1 - a * a));
-  const mx = ax + (a * dx) / d;
-  const my = ay + (a * dy) / d;
-  return {
-    x: mx + (bendSign * h * (-dy)) / d,
-    y: my + (bendSign * h * dx) / d,
-  };
 }
 
 function drawPixelLineLocal(ctx, x0, y0, x1, y1, color) {
@@ -79,97 +44,168 @@ function drawPixelQuadLocal(ctx, x0, y0, cx, cy, x1, y1, color, steps = 16) {
   }
 }
 
-// Compute live physical angler rig coordinates (also shared by game.js for exact rod tip & celebrate hand!)
+// Sleek organic selective-outlined limb (NO chunky black 4px bricks!)
+// Draws a tapered capsule-like pixel stroke with lit top/left edge and shaded underside.
+function drawOrganicLimb(ctx, x0, y0, x1, y1, lightCol, midCol, shadeCol, widthStart = 2.0, widthEnd = 1.6) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.max(1, Math.hypot(dx, dy));
+  const steps = Math.ceil(len * 2.2);
+  // Unit perpendicular pointing roughly "down/right" for underside shading
+  const nx = -dy / len;
+  const ny = dx / len;
+  const sideSign = ny >= 0 ? 1 : -1;
+  const ux = nx * sideSign;
+  const uy = ny * sideSign;
+
+  // Pass 1: subtle colored underside shadow rim (selout instead of heavy black box!)
+  ctx.fillStyle = shadeCol;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const w = lerp(widthStart, widthEnd, t);
+    const cx = lerp(x0, x1, t);
+    const cy = lerp(y0, y1, t);
+    ctx.fillRect(Math.round(cx + ux * (w * 0.55)), Math.round(cy + uy * (w * 0.55)), 1, 1);
+    if (w >= 1.8) {
+      ctx.fillRect(Math.round(cx - ux * (w * 0.45)), Math.round(cy - uy * (w * 0.45)), 1, 1);
+    }
+  }
+  // Pass 2: core volume
+  ctx.fillStyle = midCol;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const w = lerp(widthStart, widthEnd, t);
+    const cx = lerp(x0, x1, t);
+    const cy = lerp(y0, y1, t);
+    ctx.fillRect(Math.round(cx), Math.round(cy), 1, 1);
+    if (w >= 1.7) {
+      ctx.fillRect(Math.round(cx + ux * 0.5), Math.round(cy + uy * 0.5), 1, 1);
+    }
+  }
+  // Pass 3: sunlit top/leading edge highlight
+  ctx.fillStyle = lightCol;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const cx = lerp(x0, x1, t);
+    const cy = lerp(y0, y1, t);
+    ctx.fillRect(Math.round(cx - ux * 0.45), Math.round(cy - uy * 0.45), 1, 1);
+  }
+}
+
+// 2-bone analytical IK for realistic elbow & knee joints
+function solve2BoneIK(ax, ay, bx, by, len1, len2, bendSign = 1) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const d = clamp(Math.hypot(dx, dy), 0.5, len1 + len2 - 0.08);
+  const a = (len1 * len1 - len2 * len2 + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, len1 * len1 - a * a));
+  const mx = ax + (a * dx) / d;
+  const my = ay + (a * dy) / d;
+  return {
+    x: mx + (bendSign * h * (-dy)) / d,
+    y: my + (bendSign * h * dx) / d,
+  };
+}
+
+// Compute live physical angler rig coordinates (shared with game.js for exact rod tip & zero-TP fish landing!)
 export function computeAnglerRig(g) {
   const footCenterX = g.anglerX + 11;
-  const groundY = g.pierY; // exact plank top row!
+  const groundY = g.pierY; // exact plank top surface row
 
-  // Locked, solidly planted boots (wide athletic stance when fighting/reeling, natural stance when idle)
-  const stanceHalf = lerp(3.5, 5.2, clamp(g.animStance || 0, 0, 1));
+  // Natural athletic stance (widens smoothly when bracing/fighting)
+  const stanceHalf = lerp(3.4, 5.1, clamp(g.animStance || 0, 0, 1));
   const backFootX = footCenterX - stanceHalf;
   const frontFootX = footCenterX + stanceHalf;
 
-  // Smooth continuous lean (-back when charging/straining, +forward when watching/casting)
-  const lean = g.animLean || 0; // range roughly -4.5 .. +3.0 px
-  const squat = g.animSquat || 0; // range 0 .. 2.5 px knee bend
-  const breath = Math.sin(g.time * 2.5) * 0.35;
+  // Smooth continuous body weight & breathing
+  const lean = g.animLean || 0;
+  const squat = g.animSquat || 0;
+  const breath = Math.sin(g.time * 2.4) * 0.35;
 
+  // Slightly taller, heroic proportions (sleeker, less stubby/blocky!)
   const hipX = footCenterX + lean * 0.45;
-  const hipY = groundY - 10.5 + squat * 0.72;
+  const hipY = groundY - 11.2 + squat * 0.72;
 
-  const shoulderX = hipX + lean * 0.65;
-  const shoulderY = hipY - 7.5 + breath * 0.5;
+  const shoulderX = hipX + lean * 0.68;
+  const shoulderY = hipY - 8.4 + breath * 0.55;
 
-  const headX = shoulderX + lean * 0.25 + 0.5;
-  const headY = shoulderY - 5.5;
+  // Head sits seamlessly on top of the neck & spine (zero floating gap even on full lean-back!)
+  const headX = shoulderX + clamp(lean * 0.12, -0.6, 0.8) + 0.35;
+  const headY = shoulderY - 4.0;
 
-  // Compute target gripping hand (rod foregrip) + spinning reel cranking hand!
   const rodAngle = g.rodAngle ?? -0.62;
   const cosA = Math.cos(rodAngle);
   const sinA = Math.sin(rodAngle);
 
   let gripX, gripY, reelX, reelY;
-  if (g.state === 'CAUGHT' || (g.state === 'LANDING' && g.landingT > 0.55)) {
-    // Celebratory raised front hand holding the caught fish cleanly clear of head & hat!
-    const raise = g.state === 'CAUGHT' ? 1 : clamp((g.landingT - 0.55) / 0.45, 0, 1);
-    const holdX = shoulderX + 6.5;
-    const holdY = shoulderY + 1.5;
+  if (g.state === 'CAUGHT' || g.state === 'LANDING') {
+    // Stage 1 (landingT 0..0.55): hand reaches cleanly forward to meet incoming fish
+    // Stage 2 (landingT 0.55..1.0): raises the caught fish smoothly overhead -> exact match for CAUGHT!
+    const meetX = shoulderX + 8.5;
+    const meetY = shoulderY + 0.5;
     const celX = shoulderX + 9.5;
-    const celY = headY - 4.5;
-    gripX = lerp(holdX, celX, raise);
-    gripY = lerp(holdY, celY, raise);
-    reelX = shoulderX - 4.0;
-    reelY = hipY - 1.5;
+    const celY = headY - 5.5;
+    const raise = g.state === 'CAUGHT'
+      ? 1
+      : g.landingT <= 0.55
+        ? 0
+        : smoothstep(clamp((g.landingT - 0.55) / 0.45, 0, 1));
+    gripX = lerp(meetX, celX, raise);
+    gripY = lerp(meetY, celY, raise);
+    // Back hand holds the tucked rod cleanly behind shoulder
+    reelX = shoulderX - 4.2;
+    reelY = hipY - 2.2;
   } else if (g.state === 'CHARGING') {
-    const p = g.chargePower || 0;
-    gripX = shoulderX + lerp(5, -6.5, p);
-    gripY = shoulderY + lerp(1, -2.8, p);
+    const p = smoothstep(clamp(g.chargePower || 0, 0, 1));
+    gripX = shoulderX + lerp(5.5, -5.8, p);
+    gripY = shoulderY + lerp(1.0, -3.2, p);
     reelX = gripX - cosA * 2.8;
-    reelY = gripY - sinA * 2.8 + 1;
+    reelY = gripY - sinA * 2.8 + 0.8;
   } else if (g.state === 'CASTING') {
-    const t = clamp(g.castT * 2.1, 0, 1);
-    gripX = shoulderX + lerp(-5, 7.5, t);
-    gripY = shoulderY + lerp(-4.5, 0.5, t);
-    reelX = gripX - cosA * 3;
-    reelY = gripY - sinA * 3 + 1;
+    const t = smoothstep(clamp((g.castT || 0) * 2.1, 0, 1));
+    gripX = shoulderX + lerp(-5.5, 8.0, t);
+    gripY = shoulderY + lerp(-3.2, 0.4, t);
+    reelX = gripX - cosA * 2.8;
+    reelY = gripY - sinA * 2.8 + 0.8;
   } else {
-    // Ready-to-reel / waiting / bite / retrieving / reeling:
-    // Left hand grips the rod foregrip firmly forward; right hand grips & orbits the reel crank!
+    // Ready / waiting / retrieving / bite / reeling:
     const pullBack = g.state === 'REELING' ? (g.tension || 0) * 1.6 : 0;
-    gripX = shoulderX + 6.5 - pullBack;
-    gripY = shoulderY + 1.5 - (g.state === 'BITE' ? 1.5 : 0);
+    gripX = shoulderX + 6.8 - pullBack;
+    gripY = shoulderY + 1.4 - (g.state === 'BITE' ? 1.4 : 0);
 
     const seatX = gripX - cosA * 2.5;
-    const seatY = gripY - sinA * 2.5 + 1.8;
+    const seatY = gripY - sinA * 2.5 + 1.6;
 
     const isCranking =
       (g.state === 'REELING' && (g.reelHold || g.devAutoLand) && !g.fishThrashing) ||
       (g.state === 'WAITING' && g.retrieving);
 
     if (isCranking) {
-      const crankR = 2.6;
+      const crankR = 2.5;
       const ca = g.crankAngle || 0;
       reelX = seatX + Math.cos(ca) * crankR;
       reelY = seatY + Math.sin(ca) * crankR;
     } else if (g.state === 'REELING' && (g.fishThrashing || g.tension > 0.72)) {
-      // Both hands locked onto rod butt & foregrip bracing hard!
       reelX = gripX - cosA * 4.2;
-      reelY = gripY - sinA * 4.2 + 0.5;
+      reelY = gripY - sinA * 4.2 + 0.4;
     } else {
-      // Poised right on the reel crank ready to reel!
       reelX = seatX + 0.8;
       reelY = seatY + 1.2;
     }
   }
 
-  // Rod tip geometry anchored directly to the gripping hand (smoothly tucked behind shoulder during LANDING -> CAUGHT)
-  const rodLen = 27 + ((g.save && g.save.upgrades && g.save.upgrades.rod ? g.save.upgrades.rod : 1) - 1) * 2.2;
-  const tuck = g.state === 'CAUGHT' ? 1 : (g.state === 'LANDING' && g.landingT > 0.55 ? clamp((g.landingT - 0.55) / 0.45, 0, 1) : 0);
-  const rodHandX = lerp(gripX, shoulderX - 4.5, tuck);
-  const rodHandY = lerp(gripY, shoulderY + 1.5, tuck);
+  // Rod butt/tip anchored to gripping hand; smoothly tucks behind left shoulder during LANDING -> CAUGHT
+  const rodLen = 28 + ((g.save && g.save.upgrades && g.save.upgrades.rod ? g.save.upgrades.rod : 1) - 1) * 2.2;
+  const tuck = g.state === 'CAUGHT'
+    ? 1
+    : g.state === 'LANDING'
+      ? smoothstep(clamp((g.landingT - 0.42) / 0.45, 0, 1))
+      : 0;
+  const rodHandX = lerp(gripX, shoulderX - 4.4, tuck);
+  const rodHandY = lerp(gripY, shoulderY + 1.2, tuck);
   const tipBaseX = rodHandX + cosA * rodLen;
   const tipBaseY = rodHandY + sinA * rodLen;
-  const bend = (g.rodFlex || 0) * 14;
+  const bend = (g.rodFlex || 0) * 14.5;
   const tipX = tipBaseX + bend * 0.25;
   const tipY = tipBaseY + bend;
   const ctrlX = lerp(rodHandX, tipX, 0.56);
@@ -200,150 +236,276 @@ export function computeAnglerRig(g) {
   };
 }
 
+// Sculpted non-blocky coastal leather boot with rounded toe, heel contour, and warm chestnut sheen
+function drawCoastalBoot(ctx, fx, gy, isBack) {
+  const bx = Math.round(fx - 2);
+  const soleCol = isBack ? '#24140b' : '#2e190d';
+  const bodyCol = isBack ? '#6e4021' : '#96592e';
+  const sheenCol = isBack ? '#8c5530' : '#c78548';
+  const cuffCol = isBack ? '#4e6f9e' : '#7ba0cf';
+
+  // Rolled denim cuff right above boot
+  px(ctx, bx + 1, gy - 3, cuffCol, 2, 1);
+  // Boot upper & rounded toe cap (no boxy square!)
+  px(ctx, bx + 1, gy - 2, bodyCol, 3, 1);
+  px(ctx, bx + 2, gy - 2, sheenCol, 1, 1); // sunlit toe ridge
+  px(ctx, bx, gy - 1, bodyCol, 5, 1);
+  px(ctx, bx + 3, gy - 1, sheenCol, 1, 1); // rounded toe highlight
+  // Solid grounded sole sitting flush on pier plank row gy
+  px(ctx, bx, gy, soleCol, 5, 1);
+}
+
+// Tapered, contoured coastal fisherman torso (open teal vest over cream shirt — ZERO 9x9 square box!)
+function drawSculptedTorso(ctx, rig) {
+  const sx = rig.shoulderX;
+  const sy = rig.shoulderY;
+  const hx = rig.hipX;
+  const hy = rig.hipY;
+
+  // Interpolate 9 horizontal scan-slices from collar down to belt with natural shoulder->waist->hip taper!
+  const rows = [
+    // [t, halfL, halfR, kind]
+    [0.00, 2.2, 2.2, 'collar'],
+    [0.14, 3.2, 2.9, 'chest'],
+    [0.28, 3.3, 3.0, 'chest'],
+    [0.42, 3.0, 2.8, 'mid'],
+    [0.56, 2.6, 2.6, 'waist'],
+    [0.70, 2.5, 2.5, 'waist'],
+    [0.84, 2.8, 2.7, 'belt'],
+    [0.98, 2.9, 2.8, 'hip'],
+  ];
+
+  for (const [t, hl, hr, kind] of rows) {
+    const cx = lerp(sx, hx, t);
+    const cy = Math.round(lerp(sy, hy, t));
+    const xL = Math.round(cx - hl);
+    const xR = Math.round(cx + hr);
+    const w = Math.max(3, xR - xL + 1);
+
+    if (kind === 'collar') {
+      // Soft dark teal outline + crimson bandana neck wrap
+      px(ctx, xL - 1, cy, '#591620', 1, 1);
+      px(ctx, xL, cy, '#d93d46', w, 1);
+      px(ctx, xL, cy, '#ff6b6b', Math.min(2, w), 1);
+      px(ctx, xR + 1, cy, '#591620', 1, 1);
+    } else if (kind === 'belt') {
+      px(ctx, xL, cy, '#422312', w, 1);
+      px(ctx, xL + 1, cy, '#754120', Math.max(1, w - 2), 1);
+      // Warm brass belt buckle on the front
+      px(ctx, xR - 2, cy, '#facc15', 1, 1);
+    } else if (kind === 'hip') {
+      // Top of denim waistband
+      px(ctx, xL, cy, '#1c3154', w, 1);
+      px(ctx, xL + 1, cy, '#385d94', Math.max(1, w - 2), 1);
+    } else {
+      // Selective-outlined teal coastal vest over cream henley shirt!
+      px(ctx, xL - 1, cy, '#133d3c', 1, 1); // soft back rim
+      px(ctx, xL, cy, '#2c8f83', w, 1);     // main teal vest
+      px(ctx, xL, cy, '#5bc9b4', 2, 1);     // sunlit back highlight
+      // Cream henley shirt visible at front opening!
+      if (w >= 5) {
+        px(ctx, xR - 2, cy, '#f2ead9', 1, 1);
+        px(ctx, xR - 1, cy, '#1e6b66', 1, 1); // front vest lapel
+      }
+      px(ctx, xR + 1, cy, '#133d3c', 1, 1); // soft front rim
+    }
+  }
+  // Subtle vest pocket highlight on the side
+  const pX = Math.round(lerp(sx, hx, 0.56) - 0.5);
+  const pY = Math.round(lerp(sy, hy, 0.56));
+  px(ctx, pX, pY, '#1a5c58', 2, 1);
+}
+
+// Sculpted non-blocky head, layered chestnut hair, expressive face, and curved woven straw hat!
+function drawSculptedHeadAndHat(ctx, g, rig) {
+  const hx = Math.round(rig.headX);
+  const hy = Math.round(rig.headY);
+
+  // Solid warm neck seamlessly bridging chin straight into the crimson bandana collar (ZERO gap!)
+  drawPixelLineLocal(ctx, hx - 1, hy + 2, rig.shoulderX - 1, rig.shoulderY, '#b57451');
+  drawPixelLineLocal(ctx, hx, hy + 2, rig.shoulderX, rig.shoulderY, '#e0a27b');
+  drawPixelLineLocal(ctx, hx + 1, hy + 2, rig.shoulderX + 1, rig.shoulderY, '#f2ba91');
+
+  // Chamfered organic head silhouette (NO flat 7x6 rectangle!)
+  // Row hy-2 (forehead), hy-1 (brow/eye), hy (cheek/nose), hy+1 (mouth/jaw), hy+2 (tapered chin)
+  px(ctx, hx - 3, hy - 1, '#5e3420', 1, 3); // back hair rim
+  px(ctx, hx - 2, hy - 2, '#7d4628', 4, 1); // upper hair under hat
+  px(ctx, hx - 2, hy - 1, '#995732', 2, 2); // hair sideburn/lock
+  px(ctx, hx - 2, hy + 1, '#7d4628', 1, 1); // nape hair
+
+  // Warm sculpted face profile
+  px(ctx, hx, hy - 1, '#f7c8a4', 3, 1);     // brow
+  px(ctx, hx - 1, hy, '#f7c8a4', 4, 1);     // cheek + slight nose bridge!
+  px(ctx, hx, hy - 1, '#ffe4cc', 1, 1);     // forehead sunlit catchlight
+  px(ctx, hx + 3, hy, '#e8a882', 1, 1);     // gentle 1px nose tip!
+  px(ctx, hx - 1, hy + 1, '#f2b88f', 3, 1); // lower cheek
+  px(ctx, hx, hy + 2, '#d4936a', 2, 1);     // tapered rounded chin (no boxy jaw!)
+  // Warm ear pixel
+  px(ctx, hx - 1, hy, '#e6a882', 1, 1);
+
+  // Expressive eye + subtle mood (blinking, water-gaze, strain-squint, happy catch smile!)
+  const blinking = (g.time % 4.3) > 4.16;
+  const straining = g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72);
+  const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && g.landingT > 0.55);
+
+  if (blinking || happy) {
+    // Happy curved squint-eye or gentle blink
+    px(ctx, hx + 1, hy - 1, '#4a2616', 2, 1);
+    if (happy) {
+      // Warm celebratory smile pixel!
+      px(ctx, hx + 1, hy + 1, '#b55b48', 2, 1);
+      px(ctx, hx, hy, '#eb9482', 1, 1); // rosy happy cheek
+    }
+  } else if (straining) {
+    // Focused determined furrowed brow!
+    px(ctx, hx + 1, hy - 1, '#3b1e11', 2, 1);
+    px(ctx, hx + 2, hy, '#1b1d2b', 1, 1);
+    px(ctx, hx + 1, hy + 1, '#a85745', 1, 1);
+  } else {
+    // Bright readable eye tracking toward water/bobber
+    const lookDown = (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING');
+    px(ctx, hx + 1, hy - 1, '#fffaf5', 1, 1);
+    px(ctx, hx + 2, hy - 1 + (lookDown ? 0 : 0), '#1f2336', 1, 1);
+    if (lookDown) px(ctx, hx + 1, hy, '#e89b84', 1, 1); // soft cheek blush
+  }
+
+  // Curved woven coastal straw sun-hat (domed crown + upturned brim + fluttering red ribbon!)
+  const hatTilt = Math.round(clamp((g.animLean || 0) * 0.22, -1, 1));
+  const hatX = hx + hatTilt;
+  const hatY = hy - 3;
+
+  // Gently curved upturned straw brim (curved ends instead of flat brick!)
+  px(ctx, hatX - 6, hatY, '#c98e30', 1, 1);      // upturned left brim tip
+  px(ctx, hatX - 5, hatY + 1, '#784c18', 11, 1); // soft underside shadow of brim
+  px(ctx, hatX - 5, hatY, '#f2c65e', 10, 1);     // main golden brim
+  px(ctx, hatX - 4, hatY, '#fff3b8', 5, 1);      // sunlit straw brim highlight
+  px(ctx, hatX + 5, hatY, '#d99e3b', 1, 1);      // upturned right brim tip
+
+  // Crimson ribbon band around hat crown
+  px(ctx, hatX - 3, hatY - 1, '#d93d46', 7, 1);
+  px(ctx, hatX - 3, hatY - 1, '#ff6b6b', 3, 1);
+  px(ctx, hatX + 2, hatY - 1, '#991f2b', 2, 1);
+
+  // Rounded domed straw crown (tapered top row — zero sharp corners!)
+  px(ctx, hatX - 3, hatY - 2, '#f2c65e', 7, 1);
+  px(ctx, hatX - 3, hatY - 2, '#fff3b8', 3, 1);
+  px(ctx, hatX + 2, hatY - 2, '#c98e30', 2, 1);
+  px(ctx, hatX - 2, hatY - 3, '#f2c65e', 5, 1);
+  px(ctx, hatX - 2, hatY - 3, '#fff6cc', 3, 1);
+  px(ctx, hatX - 1, hatY - 4, '#c98e30', 3, 1); // soft woven crown top edge
+
+  // Fluttering crimson hat-band tail streaming in the sea breeze!
+  const ribbonWave = Math.sin(g.time * 6.2 + 1.1) * 1.1;
+  px(ctx, hatX - 4, hatY - 1, '#b82532', 1, 1);
+  px(ctx, hatX - 5, hatY - 1 + Math.round(ribbonWave * 0.5), '#d93d46', 2, 1);
+  px(ctx, hatX - 7, hatY + Math.round(ribbonWave), '#ff6b6b', 1, 1);
+}
+
 export function renderArticulatedAngler(g, ctx) {
   const rig = computeAnglerRig(g);
   const gy = rig.groundY;
 
-  // 1. Grounded contact shadow on pier planks (anchored directly under both boots!)
+  // 1. Soft grounded contact shadow under both boots on the pier planks
   const minFoot = Math.min(rig.backFootX, rig.frontFootX) - 2;
-  const maxFoot = Math.max(rig.backFootX, rig.frontFootX) + 4;
-  ctx.fillStyle = '#29160a';
+  const maxFoot = Math.max(rig.backFootX, rig.frontFootX) + 3;
+  ctx.save();
+  ctx.globalAlpha = 0.42;
+  ctx.fillStyle = '#1f1008';
   ctx.fillRect(Math.round(minFoot), gy, Math.round(maxFoot - minFoot), 1);
-  ctx.fillStyle = '#3d2210';
+  ctx.globalAlpha = 0.24;
   ctx.fillRect(Math.round(minFoot + 1), gy + 1, Math.round(maxFoot - minFoot - 2), 1);
+  ctx.restore();
 
-  // 2. Back arm (left arm reaching to rod foregrip) drawn behind torso
-  const backShoulderX = rig.shoulderX + 1.5;
-  const backShoulderY = rig.shoulderY + 0.5;
+  // 2. Back arm (left arm reaching to rod foregrip or lifting caught fish) — rolled sleeve + bare forearm
+  const backShoulderX = rig.shoulderX + 1.2;
+  const backShoulderY = rig.shoulderY + 0.8;
   const backArmBend = rig.gripX >= backShoulderX ? 1 : -1;
-  const backElbow = solve2BoneIK(backShoulderX, backShoulderY, rig.gripX, rig.gripY, 4.6, 4.6, backArmBend);
-  drawPixelLimb(ctx, backShoulderX, backShoulderY, backElbow.x, backElbow.y, '#226f6c', '#184e4c', '#111622', 2);
-  drawPixelLimb(ctx, backElbow.x, backElbow.y, rig.gripX, rig.gripY, '#226f6c', '#184e4c', '#111622', 2);
+  const backElbow = solve2BoneIK(backShoulderX, backShoulderY, rig.gripX, rig.gripY, 4.9, 4.9, backArmBend);
+  // Upper arm (shaded teal sleeve)
+  drawOrganicLimb(ctx, backShoulderX, backShoulderY, backElbow.x, backElbow.y, '#339488', '#226f6c', '#133d3c', 2.0, 1.7);
+  // Forearm (warm sunlit skin!)
+  drawOrganicLimb(ctx, backElbow.x, backElbow.y, rig.gripX, rig.gripY, '#f7c8a4', '#e0a27b', '#8c5335', 1.6, 1.3);
 
-  // 3. Articulated Legs (ankles locked onto pierY, knees smoothly bending FORWARD toward the water!)
-  const backKnee = solve2BoneIK(rig.hipX - 1.5, rig.hipY, rig.backFootX, gy - 2, 4.5, 4.5, -1);
-  const frontKnee = solve2BoneIK(rig.hipX + 1.8, rig.hipY, rig.frontFootX, gy - 2, 4.5, 4.5, -1);
+  // 3. Fluttering layered crimson scarf streaming behind the neck
+  const w1 = Math.sin(g.time * 5.0) * 1.4;
+  const w2 = Math.cos(g.time * 7.8 + 0.8) * 1.2;
+  const neckX = rig.shoulderX - 1.5;
+  const neckY = rig.shoulderY + 0.2;
+  drawOrganicLimb(ctx, neckX, neckY, neckX - 4.2, neckY + 0.8 + w1 * 0.45, '#ff6b6b', '#d93d46', '#7d1924', 1.7, 1.2);
+  px(ctx, neckX - 5.5, neckY + 1 + w1 * 0.8, '#d93d46', 2, 1);
+  px(ctx, neckX - 7, neckY + 1.2 + w2, '#ff6b6b', 1, 1);
 
-  // Back leg (darker denim)
-  drawPixelLimb(ctx, rig.hipX - 1.5, rig.hipY, backKnee.x, backKnee.y, '#2b4770', '#1d3252', '#111622', 2);
-  drawPixelLimb(ctx, backKnee.x, backKnee.y, rig.backFootX, gy - 2, '#2b4770', '#1d3252', '#111622', 2);
-  // Front leg (brighter denim)
-  drawPixelLimb(ctx, rig.hipX + 1.8, rig.hipY, frontKnee.x, frontKnee.y, '#466da6', '#2a4773', '#111622', 2);
-  drawPixelLimb(ctx, frontKnee.x, frontKnee.y, rig.frontFootX, gy - 2, '#466da6', '#2a4773', '#111622', 2);
+  // 4. Tapered articulated legs (natural denim thighs -> knees -> calves -> cuffed coastal boots!)
+  const backKnee = solve2BoneIK(rig.hipX - 1.4, rig.hipY, rig.backFootX, gy - 2.2, 4.8, 4.8, -1);
+  const frontKnee = solve2BoneIK(rig.hipX + 1.4, rig.hipY, rig.frontFootX, gy - 2.2, 4.8, 4.8, -1);
 
-  // Grounded pixel leather boots sitting flush on gy (bottom ink pixel strictly ON row gy!)
-  for (const fx of [rig.backFootX, rig.frontFootX]) {
-    const bx = Math.round(fx - 1);
-    px(ctx, bx - 1, gy - 3, '#111622', 6, 4);
-    px(ctx, bx, gy - 2, '#9e6232', 3, 1);
-    px(ctx, bx, gy - 1, '#693c1e', 4, 1);
-    px(ctx, bx + 1, gy - 2, '#c7884a', 1, 1);
-  }
+  // Back leg (deeper indigo denim)
+  drawOrganicLimb(ctx, rig.hipX - 1.4, rig.hipY, backKnee.x, backKnee.y, '#3d5f94', '#294470', '#162542', 2.2, 1.8);
+  drawOrganicLimb(ctx, backKnee.x, backKnee.y, rig.backFootX, gy - 2.2, '#3d5f94', '#294470', '#162542', 1.8, 1.5);
+  drawCoastalBoot(ctx, rig.backFootX, gy, true);
 
-  // 4. Fluttering red scarf tail trailing behind neck in the coastal breeze
-  const wind = Math.sin(g.time * 5.2) * 1.4 + Math.cos(g.time * 8.4) * 0.6;
-  const neckX = rig.shoulderX - 1;
-  const neckY = rig.shoulderY - 1;
-  drawPixelLimb(ctx, neckX - 1, neckY, neckX - 4.5, neckY + 1 + wind * 0.5, '#e64848', '#a32430', '#111622', 1);
-  px(ctx, neckX - 6, neckY + 1 + wind, '#e64848', 2, 1);
+  // Front leg (bright sunlit coastal denim)
+  drawOrganicLimb(ctx, rig.hipX + 1.4, rig.hipY, frontKnee.x, frontKnee.y, '#6490cc', '#446ca3', '#203861', 2.3, 1.9);
+  drawOrganicLimb(ctx, frontKnee.x, frontKnee.y, rig.frontFootX, gy - 2.2, '#6490cc', '#446ca3', '#203861', 1.9, 1.5);
+  drawCoastalBoot(ctx, rig.frontFootX, gy, false);
 
-  // 5. Torso / Coastal Teal Jacket & Belt (smoothly angled from hip to shoulder)
-  const tx = Math.round(lerp(rig.hipX, rig.shoulderX, 0.5));
-  const ty = Math.round(lerp(rig.hipY, rig.shoulderY, 0.5));
-  // Ink silhouette
-  px(ctx, tx - 4, ty - 4, '#111622', 9, 9);
-  // Teal jacket fill + highlight + shadow fold
-  px(ctx, tx - 3, ty - 3, '#3ea899', 7, 6);
-  px(ctx, tx - 3, ty - 3, '#6ad4c0', 2, 5); // sunlit back rim
-  px(ctx, tx + 2, ty - 2, '#226f6c', 2, 5); // shaded chest fold
-  // Belt + brass buckle
-  px(ctx, tx - 3, ty + 3, '#693c1e', 7, 1);
-  px(ctx, tx + 1, ty + 3, '#facc15', 1, 1);
-  // Red bandana collar around neck
-  px(ctx, Math.round(rig.shoulderX - 3), Math.round(rig.shoulderY - 2), '#111622', 7, 3);
-  px(ctx, Math.round(rig.shoulderX - 2), Math.round(rig.shoulderY - 1), '#e64848', 5, 1);
-  px(ctx, Math.round(rig.shoulderX + 1), Math.round(rig.shoulderY - 1), '#a32430', 2, 1);
+  // 5. Sculpted fisherman torso (open teal vest + cream henley + brass-buckled belt)
+  drawSculptedTorso(ctx, rig);
 
-  // 6. Head, Hair, Gaze-Tracking Eye & Sculpted Straw Hat
-  const hx = Math.round(rig.headX);
-  const hy = Math.round(rig.headY);
-  // Head outline + skin
-  px(ctx, hx - 3, hy - 2, '#111622', 7, 6);
-  px(ctx, hx - 2, hy - 1, '#f7c8a4', 5, 4);
-  px(ctx, hx - 2, hy + 2, '#d99870', 4, 1); // chin shade
-  px(ctx, hx - 2, hy - 1, '#a66849', 1, 3); // hair sideburn
+  // 6. Sculpted head, layered hair, expressive face & curved woven straw hat
+  drawSculptedHeadAndHat(ctx, g, rig);
 
-  // Natural blinking + subtle gaze tracking toward water/bobber!
-  const blinking = (g.time % 4.3) > 4.15;
-  const eyeY = hy + (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING' ? 1 : 0);
-  if (blinking) {
-    px(ctx, hx + 1, eyeY, '#a66849', 2, 1);
-  } else {
-    px(ctx, hx + 1, eyeY, '#f8fafc', 1, 1);
-    px(ctx, hx + 2, eyeY, '#111622', 1, 1);
-  }
-
-  // Straw hat (tilts slightly with lean/strain!)
-  const hatShift = Math.round(clamp((g.animLean || 0) * 0.2, -1, 1));
-  const hatX = hx + hatShift;
-  const hatY = hy - 3;
-  // Crown outline
-  px(ctx, hatX - 4, hatY - 3, '#111622', 8, 4);
-  px(ctx, hatX - 3, hatY - 2, '#f5cf6b', 6, 2);
-  px(ctx, hatX - 3, hatY - 2, '#fff3b0', 3, 1);
-  // Red hat band
-  px(ctx, hatX - 4, hatY, '#e64848', 8, 1);
-  px(ctx, hatX + 1, hatY, '#a32430', 3, 1);
-  // Wide sun brim
-  px(ctx, hatX - 6, hatY + 1, '#111622', 12, 2);
-  px(ctx, hatX - 5, hatY + 1, '#f5cf6b', 10, 1);
-  px(ctx, hatX - 5, hatY + 1, '#fff3b0', 4, 1);
-  px(ctx, hatX + 3, hatY + 1, '#cf983c', 2, 1);
-
-  // 7. Fishing Rod (cork butt -> flexible curved blank -> tip ring -> spinning reel seat)
-  const rodColors = ['#c99755', '#60a5fa', '#cbd5e1', '#2dd4bf', '#facc15'];
+  // 7. Fishing Rod (cork grip -> flexible tapered blank -> glowing tip guide -> spinning reel)
+  const rodColors = ['#d49c59', '#60a5fa', '#e2e8f0', '#2dd4bf', '#facc15'];
   const rodColor = rodColors[((g.save && g.save.upgrades ? g.save.upgrades.rod : 1) - 1) % rodColors.length];
 
-  const buttX = rig.rodHandX - rig.cosA * 5.5;
-  const buttY = rig.rodHandY - rig.sinA * 5.5;
-  drawPixelLineLocal(ctx, buttX, buttY + 1, rig.rodHandX, rig.rodHandY + 1, '#111622');
-  drawPixelLineLocal(ctx, buttX, buttY, rig.rodHandX, rig.rodHandY, '#b87a42');
+  const buttX = rig.rodHandX - rig.cosA * 5.2;
+  const buttY = rig.rodHandY - rig.sinA * 5.2;
+  drawPixelLineLocal(ctx, buttX, buttY + 1, rig.rodHandX, rig.rodHandY + 1, '#4a2b14');
+  drawPixelLineLocal(ctx, buttX, buttY, rig.rodHandX, rig.rodHandY, '#c98c50');
 
-  drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY, rig.ctrlX, rig.ctrlY, rig.tipX, rig.tipY, '#111622', 16);
+  drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY, rig.ctrlX, rig.ctrlY, rig.tipX, rig.tipY, '#1c2638', 16);
   drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY - 1, rig.ctrlX, rig.ctrlY - 1, rig.tipX, rig.tipY - 1, rodColor, 16);
-  px(ctx, rig.tipX, rig.tipY - 1, '#f8fafc', 1, 1);
+  px(ctx, rig.tipX, rig.tipY - 1, '#ffffff', 1, 1);
 
-  // Spinning reel body + rotating crank arm connected straight to the right hand!
+  // Sleek silver spinning reel & rotating crank arm
   const seatX = rig.rodHandX - rig.cosA * 2.2;
-  const seatY = rig.rodHandY - rig.sinA * 2.2 + 1.5;
-  px(ctx, seatX - 2, seatY - 1, '#111622', 4, 4);
-  px(ctx, seatX - 1, seatY, '#94a3b8', 2, 2);
-  px(ctx, seatX - 1, seatY, '#f8fafc', 1, 1);
+  const seatY = rig.rodHandY - rig.sinA * 2.2 + 1.4;
+  px(ctx, seatX - 1, seatY, '#475569', 3, 2);
+  px(ctx, seatX, seatY, '#cbd5e1', 2, 1);
+  px(ctx, seatX, seatY, '#ffffff', 1, 1);
 
-  if (g.state !== 'CHARGING' && g.state !== 'CASTING' && g.state !== 'CAUGHT') {
-    drawPixelLineLocal(ctx, seatX, seatY + 1, rig.reelX, rig.reelY, '#cbd5e1');
+  if (g.state !== 'CHARGING' && g.state !== 'CASTING' && g.state !== 'CAUGHT' && g.state !== 'LANDING') {
+    drawPixelLineLocal(ctx, seatX, seatY + 1, rig.reelX, rig.reelY, '#e2e8f0');
   }
 
-  // Left (gripping) hand fingers over rod foregrip
-  px(ctx, rig.gripX - 1, rig.gripY - 1, '#111622', 4, 3);
-  px(ctx, rig.gripX, rig.gripY, '#f7c8a4', 2, 1);
+  // Sculpted left hand gripping rod foregrip / holding fish (compact warm skin, zero giant black mitten!)
+  px(ctx, rig.gripX - 1, rig.gripY, '#b57451', 3, 2);
+  px(ctx, rig.gripX, rig.gripY, '#ffe0c4', 2, 1);
 
-  // 8. Front arm (right cranking arm!) drawn in foreground with full 60fps IK to the reel handle!
-  const frontShoulderX = rig.shoulderX - 1.5;
-  const frontShoulderY = rig.shoulderY + 0.5;
+  // 8. Front arm (right cranking arm!) with sleek rolled sleeve + bare tanned forearm
+  const frontShoulderX = rig.shoulderX - 1.4;
+  const frontShoulderY = rig.shoulderY + 0.8;
   const frontArmBend = rig.reelX >= frontShoulderX ? 1 : -1;
-  const frontElbow = solve2BoneIK(frontShoulderX, frontShoulderY, rig.reelX, rig.reelY, 4.6, 4.6, frontArmBend);
-  drawPixelLimb(ctx, frontShoulderX, frontShoulderY, frontElbow.x, frontElbow.y, '#3ea899', '#226f6c', '#111622', 2);
-  drawPixelLimb(ctx, frontElbow.x, frontElbow.y, rig.reelX, rig.reelY, '#3ea899', '#226f6c', '#111622', 2);
-  // Right hand gripping crank knob
-  px(ctx, rig.reelX - 1, rig.reelY - 1, '#111622', 4, 3);
-  px(ctx, rig.reelX, rig.reelY, '#f7c8a4', 2, 1);
-  px(ctx, rig.reelX + 1, rig.reelY, '#facc15', 1, 1);
+  const frontElbow = solve2BoneIK(frontShoulderX, frontShoulderY, rig.reelX, rig.reelY, 4.9, 4.9, frontArmBend);
+  // Rolled teal sleeve upper arm
+  drawOrganicLimb(ctx, frontShoulderX, frontShoulderY, frontElbow.x, frontElbow.y, '#5bc9b4', '#2c8f83', '#133d3c', 2.0, 1.7);
+  // Cream sleeve cuff accent at elbow
+  px(ctx, frontElbow.x, frontElbow.y, '#f2ead9', 1, 1);
+  // Warm tanned forearm
+  drawOrganicLimb(ctx, frontElbow.x, frontElbow.y, rig.reelX, rig.reelY, '#ffe0c4', '#f2ba91', '#9c5d3c', 1.6, 1.3);
+  // Sculpted right hand + brass crank knob
+  px(ctx, rig.reelX - 1, rig.reelY, '#b57451', 3, 2);
+  px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
+  if (g.state !== 'CAUGHT' && g.state !== 'LANDING') {
+    px(ctx, rig.reelX + 1, rig.reelY + 1, '#facc15', 1, 1);
+  }
 
-  // 9. Celebrated caught fish held proudly right in the raised hand (0px jump from LANDING!)
+  // 9. Celebrated caught fish held proudly right in the raised hand (0.00px continuity from LANDING!)
   if (g.state === 'CAUGHT' && g.lastCatchInfo) {
     const fSpr = g.sprites.fish[g.lastCatchInfo.species.id].right[Math.floor(g.time * 8) % 4];
-    const bob = Math.sin(g.time * 6) * 1.0;
+    // Starts at exact 0.00px offset when catchTime === 0 so LANDING -> CAUGHT has ZERO jump!
+    const bob = Math.sin((g.catchTime || 0) * 5.2) * 0.9;
     ctx.drawImage(
       fSpr,
       Math.round(rig.gripX - fSpr.width / 2),

@@ -104,6 +104,7 @@ export function renderGameWorld(g, ctx) {
   renderWaterSurface(g, ctx, map, pal, cel);
   renderPierFront(g, ctx, map, pal);
   renderAnglerAndRod(g, ctx);
+  renderLandingFishForeground(g, ctx);
   renderEffects(g, ctx, map, pal);
   renderInWorldMeters(g, ctx);
 
@@ -670,6 +671,8 @@ function renderPierFront(g, ctx, map, pal) {
 
 function renderFishes(g, ctx, pal) {
   for (const f of g.fishes) {
+    // During LANDING, the lifted fish is drawn in the foreground pass above water & pier (zero z-pop!)
+    if (g.state === 'LANDING' && f === g.activeFish) continue;
     const sprSet = g.sprites.fish[f.species.id];
     const animSpeed =
       f.ai === 'HOOKED' && g.fishThrashing ? 18 :
@@ -744,6 +747,19 @@ function renderFishes(g, ctx, pal) {
     }
     ctx.restore();
   }
+}
+
+// Foreground pass for the lifted fish during LANDING so it glides cleanly above the water & pier straight into the angler's hand (0px jump, 0 z-pop!)
+function renderLandingFishForeground(g, ctx) {
+  if (g.state !== 'LANDING' || !g.activeFish) return;
+  const f = g.activeFish;
+  const sprSet = g.sprites.fish[f.species.id];
+  if (!sprSet) return;
+  const frame = Math.floor(g.time * 9) % sprSet.right.length;
+  const img = f.dir >= 0 ? sprSet.right[frame] : sprSet.left[frame];
+  const dx = Math.round(f.x - sprSet.w / 2);
+  const dy = Math.round(f.y - sprSet.h / 2);
+  ctx.drawImage(img, dx, dy);
 }
 
 function renderWaterSurface(g, ctx, map, pal, cel) {
@@ -842,7 +858,9 @@ function renderLineAndHook(g, ctx) {
   const lineColor = isDanger ? '#fca5a5' : isSweet ? '#5eead4' : '#e2e8f0';
 
   if (g.state === 'LANDING') {
-    drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#e2e8f0');
+    if (g.landingT < 0.56) {
+      drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#e2e8f0');
+    }
     return;
   }
 
