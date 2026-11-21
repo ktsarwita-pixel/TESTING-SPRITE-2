@@ -33,12 +33,13 @@
         <button id="btn-maps" class="pixel-btn accent-cyan" type="button" aria-label="Open Fishing Maps">MAP</button>
         <button id="btn-shop" class="pixel-btn accent-gold" type="button" aria-label="Open Tackle Shop">SHOP</button>
         <button id="btn-log" class="pixel-btn" type="button" aria-label="Open Fish Log">LOG</button>
+        <button id="btn-admin" class="pixel-btn accent-purple" type="button" aria-label="Open Admin Test Panel" title="Admin Test Panel">DEV</button>
         <button id="btn-sound" class="pixel-btn icon-btn" type="button" aria-label="Toggle Sound" title="Toggle Sound">SFX</button>
       </div>
     </header>
 
     <!-- Current map & water zone indicator -->
-    <div id="depth-badge" class="pixel-pill small-pill">SUNLIT PIER &bull; SHALLOW</div>
+    <div id="depth-badge" class="pixel-pill small-pill">SUNLIT PIER &bull; PIER</div>
 
     <!-- Context hint banner -->
     <div id="hint-banner" role="status" aria-live="polite">HOLD &amp; RELEASE TO CAST</div>
@@ -70,18 +71,18 @@
     <div id="catch-overlay" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="catch-title">
       <div class="pixel-panel catch-card">
         <div id="catch-rarity" class="rarity-tag">COMMON</div>
-        <h2 id="catch-title">SARDINE</h2>
+        <h2 id="catch-title">SILVER MINNOW</h2>
         <div class="catch-sprite-frame">
           <img id="catch-sprite" alt="Caught fish pixel sprite" />
         </div>
         <div class="catch-meta">
           <div class="meta-cell">
             <span class="meta-k">WEIGHT</span>
-            <span id="catch-weight" class="meta-v">0.4 kg</span>
+            <span id="catch-weight" class="meta-v">0.40 kg</span>
           </div>
           <div class="meta-cell">
             <span class="meta-k">VALUE</span>
-            <span id="catch-value" class="meta-v gold">+12 G</span>
+            <span id="catch-value" class="meta-v gold">+14 G</span>
           </div>
           <div class="meta-cell">
             <span class="meta-k">RECORD</span>
@@ -126,6 +127,63 @@
           <button id="btn-log-close" class="pixel-btn close-btn" type="button" aria-label="Close Fish Log">X</button>
         </div>
         <div id="log-grid" class="modal-body log-grid"></div>
+      </div>
+    </div>
+
+    <!-- Admin / Dev Test Panel modal -->
+    <div id="admin-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="admin-title">
+      <div class="pixel-panel modal-panel">
+        <div class="modal-header">
+          <h2 id="admin-title">ADMIN TEST PANEL</h2>
+          <span id="admin-status" class="modal-sub">DEV TOOLS</span>
+          <button id="btn-admin-close" class="pixel-btn close-btn" type="button" aria-label="Close Admin Panel">X</button>
+        </div>
+        <div class="modal-body admin-body">
+          <div class="admin-section">
+            <div class="admin-label">GOLD &amp; PROGRESSION</div>
+            <div class="admin-row">
+              <button id="adm-gold-100" class="pixel-btn accent-gold" type="button">+100 G</button>
+              <button id="adm-gold-1000" class="pixel-btn accent-gold" type="button">+1000 G</button>
+              <button id="adm-unlock-maps" class="pixel-btn accent-cyan" type="button">ALL MAPS</button>
+              <button id="adm-max-gear" class="pixel-btn accent-cyan" type="button">MAX GEAR</button>
+              <button id="adm-fill-log" class="pixel-btn" type="button">FILL LOG</button>
+              <button id="adm-reset" class="pixel-btn danger-btn" type="button">RESET SAVE</button>
+            </div>
+          </div>
+
+          <div class="admin-section">
+            <div class="admin-label">INSTANT MAP WARP</div>
+            <div id="adm-map-row" class="admin-row"></div>
+          </div>
+
+          <div class="admin-section">
+            <div class="admin-label">TIME OF DAY</div>
+            <div class="admin-row">
+              <button id="adm-tod-dawn" class="pixel-btn" type="button">DAWN</button>
+              <button id="adm-tod-day" class="pixel-btn" type="button">DAY</button>
+              <button id="adm-tod-sunset" class="pixel-btn" type="button">SUNSET</button>
+              <button id="adm-tod-night" class="pixel-btn" type="button">NIGHT</button>
+              <button id="adm-tod-freeze" class="pixel-btn" type="button">CLOCK: RUN</button>
+            </div>
+          </div>
+
+          <div class="admin-section">
+            <div class="admin-label">SPAWN &amp; BITE TESTER</div>
+            <div class="admin-row">
+              <select id="adm-fish-select" class="pixel-select" aria-label="Choose fish species"></select>
+              <button id="adm-spawn-fish" class="pixel-btn" type="button">SPAWN</button>
+              <button id="adm-force-bite" class="pixel-btn accent-purple" type="button">INSTANT BITE</button>
+            </div>
+          </div>
+
+          <div class="admin-section">
+            <div class="admin-label">REELING HELPERS</div>
+            <div class="admin-row">
+              <button id="adm-nosnap" class="pixel-btn" type="button">NO SNAP: OFF</button>
+              <button id="adm-autoland" class="pixel-btn accent-cyan" type="button">AUTO-LAND ACTIVE</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -1,5 +1,5 @@
-// PIERLINE — 2D Pixel-Art Side-POV Fishing Game (Mobile + Desktop, Multi-Map)
-import { FISH_SPECIES, RARITY_META, UPGRADES, getUpgradeCost } from './fishData.js';
+// PIERLINE — 2D Pixel-Art Side-POV Fishing Game (Mobile + Desktop, Multi-Map, Realistic Reeling + Admin Panel)
+import { FISH_SPECIES, RARITY_META, UPGRADES, getUpgradeCost, getSpeciesById } from './fishData.js';
 import { MAPS, getMapById } from './maps.js';
 import { buildSpriteCache, spriteToDataURL } from './sprites.js';
 import { renderGameWorld } from './renderer.js';
@@ -9,6 +9,7 @@ const SAVE_KEY = 'pierline_pixel_fishing_v1';
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
+const smoothstep = (t) => t * t * (3 - 2 * t);
 
 function defaultSave() {
   return {
@@ -22,23 +23,54 @@ function defaultSave() {
   };
 }
 
+function sanitizeSave(rawObj) {
+  const base = defaultSave();
+  if (!rawObj || typeof rawObj !== 'object') return base;
+  const unlocked = Array.isArray(rawObj.unlockedMaps) && rawObj.unlockedMaps.length
+    ? Array.from(new Set(['harbor', ...rawObj.unlockedMaps.filter((id) => MAPS.some((m) => m.id === id))]))
+    : ['harbor'];
+  const currentMap = unlocked.includes(rawObj.currentMap) ? rawObj.currentMap : 'harbor';
+
+  const cleanLog = {};
+  if (rawObj.log && typeof rawObj.log === 'object') {
+    for (const [id, entry] of Object.entries(rawObj.log)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const sp = FISH_SPECIES.find((s) => s.id === id);
+      if (!sp) continue;
+      const count = Number.isFinite(entry.count) && entry.count > 0 ? Math.round(entry.count) : 1;
+      const fallbackKg = Number(((sp.minWeight + sp.maxWeight) * 0.5).toFixed(2));
+      const bestKg = Number.isFinite(entry.bestKg) && entry.bestKg > 0 ? Number(entry.bestKg) : fallbackKg;
+      cleanLog[id] = { count, bestKg };
+    }
+  }
+
+  const u = rawObj.upgrades && typeof rawObj.upgrades === 'object' ? rawObj.upgrades : {};
+  const cleanUpgrade = (k) => {
+    const v = Number(u[k]);
+    return Number.isFinite(v) ? clamp(Math.round(v), 1, 5) : 1;
+  };
+
+  return {
+    coins: Number.isFinite(Number(rawObj.coins)) && Number(rawObj.coins) >= 0 ? Math.round(Number(rawObj.coins)) : 0,
+    totalCaught: Number.isFinite(Number(rawObj.totalCaught)) && Number(rawObj.totalCaught) >= 0 ? Math.round(Number(rawObj.totalCaught)) : 0,
+    upgrades: {
+      rod: cleanUpgrade('rod'),
+      line: cleanUpgrade('line'),
+      lure: cleanUpgrade('lure'),
+      charm: cleanUpgrade('charm'),
+    },
+    log: cleanLog,
+    currentMap,
+    unlockedMaps: unlocked,
+    sound: rawObj.sound !== false,
+  };
+}
+
 function loadSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return defaultSave();
-    const parsed = JSON.parse(raw);
-    const unlocked = Array.isArray(parsed.unlockedMaps) && parsed.unlockedMaps.length
-      ? Array.from(new Set(['harbor', ...parsed.unlockedMaps]))
-      : ['harbor'];
-    const currentMap = unlocked.includes(parsed.currentMap) ? parsed.currentMap : 'harbor';
-    return {
-      ...defaultSave(),
-      ...parsed,
-      currentMap,
-      unlockedMaps: unlocked,
-      upgrades: { ...defaultSave().upgrades, ...(parsed.upgrades || {}) },
-      log: parsed.log || {},
-    };
+    return sanitizeSave(JSON.parse(raw));
   } catch {
     return defaultSave();
   }
@@ -55,6 +87,7 @@ class PierlineGame {
     }
 
     this.save = loadSave();
+    this.persist();
     sound.setMuted(this.save.sound === false);
 
     // Virtual pixel resolution (recomputed on resize/orientation change)
@@ -73,7 +106,7 @@ class PierlineGame {
     this.timeOfDay = 0.27;
     this.lastFrame = performance.now();
 
-    // Casting / bobber / hook
+    // Casting / bobber / hook / smooth rod physics
     this.chargePower = 0;
     this.chargeDir = 1;
     this.castStartX = 0;
@@ -86,13 +119,15 @@ class PierlineGame {
     this.hookY = 92;
     this.targetDepthY = 92;
     this.rodFlex = 0;
+    this.rodAngle = -0.62;
     this.castFollowThrough = 0;
 
-    // Bite & reeling state
+    // Realistic bite, reeling & landing state
     this.activeFish = null;
     this.biteTimer = 0;
     this.tension = 0;
     this.progress = 0;
+    this.reelTotalDist = 60;
     this.fishThrashing = false;
     this.fishFightTimer = 0;
     this.reelHold = false;
@@ -101,7 +136,13 @@ class PierlineGame {
     this.landingT = 0;
     this.landingStartX = 0;
     this.landingStartY = 0;
+    this.landingStartDir = -1;
     this.lastCatchInfo = null;
+
+    // Admin / Dev test options
+    this.devClockFrozen = false;
+    this.devNoSnap = false;
+    this.devAutoLand = false;
 
     // Ambient world entities
     this.fishes = [];
@@ -126,6 +167,7 @@ class PierlineGame {
     this.initWorldScenery();
     this.populateFish();
     this.bindEvents();
+    this.initAdminUI();
     this.updateHUD();
     this.updateControlsUI();
 
@@ -155,6 +197,7 @@ class PierlineGame {
       btnMaps: document.getElementById('btn-maps'),
       btnShop: document.getElementById('btn-shop'),
       btnLog: document.getElementById('btn-log'),
+      btnAdmin: document.getElementById('btn-admin'),
       btnSound: document.getElementById('btn-sound'),
       catchOverlay: document.getElementById('catch-overlay'),
       catchRarity: document.getElementById('catch-rarity'),
@@ -177,6 +220,26 @@ class PierlineGame {
       logCount: document.getElementById('log-count'),
       logGrid: document.getElementById('log-grid'),
       btnLogClose: document.getElementById('btn-log-close'),
+      adminModal: document.getElementById('admin-modal'),
+      adminStatus: document.getElementById('admin-status'),
+      btnAdminClose: document.getElementById('btn-admin-close'),
+      admGold100: document.getElementById('adm-gold-100'),
+      admGold1000: document.getElementById('adm-gold-1000'),
+      admUnlockMaps: document.getElementById('adm-unlock-maps'),
+      admMaxGear: document.getElementById('adm-max-gear'),
+      admFillLog: document.getElementById('adm-fill-log'),
+      admReset: document.getElementById('adm-reset'),
+      admMapRow: document.getElementById('adm-map-row'),
+      admTodDawn: document.getElementById('adm-tod-dawn'),
+      admTodDay: document.getElementById('adm-tod-day'),
+      admTodSunset: document.getElementById('adm-tod-sunset'),
+      admTodNight: document.getElementById('adm-tod-night'),
+      admTodFreeze: document.getElementById('adm-tod-freeze'),
+      admFishSelect: document.getElementById('adm-fish-select'),
+      admSpawnFish: document.getElementById('adm-spawn-fish'),
+      admForceBite: document.getElementById('adm-force-bite'),
+      admNoSnap: document.getElementById('adm-nosnap'),
+      admAutoLand: document.getElementById('adm-autoland'),
     };
   }
 
@@ -193,9 +256,9 @@ class PierlineGame {
     return {
       maxCastFrac: 0.56 + (u.rod - 1) * 0.10,
       maxDepthFrac: 0.48 + (u.line - 1) * 0.125,
-      reelSpeed: 0.25 + (u.rod - 1) * 0.055,
-      tensionDecay: 0.44 + (u.line - 1) * 0.06,
-      lineStrength: 1 + (u.line - 1) * 0.26,
+      reelSpeed: 0.28 + (u.rod - 1) * 0.06,
+      tensionDecay: 0.46 + (u.line - 1) * 0.06,
+      lineStrength: 1 + (u.line - 1) * 0.28,
       lureLuck: 1 + (u.lure - 1) * 0.38,
       attractRadius: 34 + (u.lure - 1) * 10,
       coinMult: 1 + ((u.charm || 1) - 1) * 0.25,
@@ -320,12 +383,31 @@ class PierlineGame {
     return { idx: 2, name: 'DEEP' };
   }
 
-  selectMap(mapId) {
+  getCelebrateHandPos() {
+    const cel = this.sprites.angler.celebrate0 || this.sprites.angler.idle0;
+    return {
+      x: this.anglerX + cel.hand[0],
+      y: (this.pierY - cel.h + 1) + cel.hand[1],
+    };
+  }
+
+  getFishMouthPos(fish) {
+    const spr = this.sprites.fish[fish.species.id];
+    const halfW = spr ? spr.w * 0.38 : 6;
+    return {
+      x: fish.x + fish.dir * halfW,
+      y: fish.y,
+    };
+  }
+
+  selectMap(mapId, forceUnlock = false) {
     const target = getMapById(mapId);
     if (!target) return;
     if (!this.save.unlockedMaps.includes(target.id)) {
-      if (this.save.coins < target.cost) return;
-      this.save.coins -= target.cost;
+      if (!forceUnlock) {
+        if (this.save.coins < target.cost) return;
+        this.save.coins -= target.cost;
+      }
       this.save.unlockedMaps.push(target.id);
       sound.playBuy();
     } else {
@@ -335,11 +417,11 @@ class PierlineGame {
     this.save.currentMap = target.id;
     this.persist();
 
-    // Reset active cast cleanly and refresh biome
     this.state = 'IDLE';
     this.activeFish = null;
     this.chargeHold = false;
     this.reelHold = false;
+    this.devAutoLand = false;
     this.tension = 0;
     this.progress = 0;
     this.bubbles = [];
@@ -361,13 +443,14 @@ class PierlineGame {
 
     let total = 0;
     const weights = list.map((sp) => {
+      const baseWeight = (RARITY_META[sp.rarity] && RARITY_META[sp.rarity].weight) || 0.5;
       const rarityBoost =
-        sp.rarity === 'mythic' ? Math.pow(stats.lureLuck, 1.8) :
-        sp.rarity === 'legendary' ? Math.pow(stats.lureLuck, 1.55) :
+        sp.rarity === 'legendary' ? Math.pow(stats.lureLuck, 1.7) :
+        sp.rarity === 'epic' ? Math.pow(stats.lureLuck, 1.45) :
         sp.rarity === 'rare' ? Math.pow(stats.lureLuck, 1.25) :
         sp.rarity === 'uncommon' ? Math.pow(stats.lureLuck, 1.05) :
         1;
-      const w = sp.spawnWeight * rarityBoost;
+      const w = baseWeight * rarityBoost;
       total += w;
       return w;
     });
@@ -380,10 +463,10 @@ class PierlineGame {
     return list[0];
   }
 
-  spawnFish(fromEdge = false) {
+  spawnFish(fromEdge = false, forcedSpecies = null) {
     const waterH = Math.max(40, this.vh - 18 - this.waterY);
     const depthFrac = clamp(Math.pow(Math.random(), 0.92), 0.08, 0.95);
-    const species = this.pickSpeciesForDepth(depthFrac);
+    const species = forcedSpecies || this.pickSpeciesForDepth(depthFrac);
     const clampedFrac = clamp(depthFrac, species.minDepth, species.maxDepth);
     const y = this.waterY + 8 + clampedFrac * (waterH - 12);
     const dir = Math.random() > 0.5 ? 1 : -1;
@@ -395,6 +478,8 @@ class PierlineGame {
       species,
       x,
       y,
+      vx: 0,
+      vy: 0,
       homeY: y,
       dir,
       speed: species.speed * rand(0.85, 1.18),
@@ -411,6 +496,173 @@ class PierlineGame {
     for (let i = 0; i < targetCount; i++) {
       this.fishes.push(this.spawnFish(false));
     }
+  }
+
+  // ── Admin / Dev Test Panel ────────────────────────────────────────────────
+  initAdminUI() {
+    if (this.el.admFishSelect) {
+      this.el.admFishSelect.innerHTML = FISH_SPECIES.map(
+        (sp) => `<option value="${sp.id}">${sp.name} (${RARITY_META[sp.rarity].label})</option>`
+      ).join('');
+    }
+    if (this.el.admMapRow) {
+      this.el.admMapRow.innerHTML = '';
+      for (const m of MAPS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pixel-btn';
+        b.textContent = m.shortTag;
+        b.title = `Warp to ${m.name}`;
+        b.addEventListener('click', () => this.selectMap(m.id, true));
+        this.el.admMapRow.appendChild(b);
+      }
+    }
+
+    const bind = (el, fn) => {
+      if (el) el.addEventListener('click', () => { sound.unlock(); fn(); });
+    };
+
+    bind(this.el.admGold100, () => this.adminAddGold(100));
+    bind(this.el.admGold1000, () => this.adminAddGold(1000));
+    bind(this.el.admUnlockMaps, () => this.adminUnlockAllMaps());
+    bind(this.el.admMaxGear, () => this.adminMaxGear());
+    bind(this.el.admFillLog, () => this.adminFillLog());
+    bind(this.el.admReset, () => this.adminResetSave());
+
+    bind(this.el.admTodDawn, () => this.adminSetTime(0.18));
+    bind(this.el.admTodDay, () => this.adminSetTime(0.38));
+    bind(this.el.admTodSunset, () => this.adminSetTime(0.75));
+    bind(this.el.admTodNight, () => this.adminSetTime(0.02));
+    bind(this.el.admTodFreeze, () => {
+      this.devClockFrozen = !this.devClockFrozen;
+      this.refreshAdminLabels();
+      sound.playJig();
+    });
+
+    bind(this.el.admSpawnFish, () => {
+      const id = this.el.admFishSelect ? this.el.admFishSelect.value : FISH_SPECIES[0].id;
+      this.adminSpawnSpecies(id);
+    });
+    bind(this.el.admForceBite, () => {
+      const id = this.el.admFishSelect ? this.el.admFishSelect.value : FISH_SPECIES[0].id;
+      this.adminTriggerBite(id);
+    });
+    bind(this.el.admNoSnap, () => {
+      this.devNoSnap = !this.devNoSnap;
+      this.refreshAdminLabels();
+      sound.playJig();
+    });
+    bind(this.el.admAutoLand, () => {
+      if (this.state === 'REELING') {
+        this.devAutoLand = true;
+        this.closeModals();
+        this.spawnFloat(this.vw * 0.5, this.waterY - 12, 'AUTO-REEL ON', '#38bdf8');
+      } else {
+        this.setAdminStatus('HOOK A FISH FIRST');
+      }
+    });
+    this.refreshAdminLabels();
+  }
+
+  setAdminStatus(msg) {
+    if (this.el.adminStatus) this.el.adminStatus.textContent = msg;
+  }
+
+  refreshAdminLabels() {
+    if (this.el.admTodFreeze) {
+      this.el.admTodFreeze.textContent = this.devClockFrozen ? 'CLOCK: PAUSED' : 'CLOCK: RUN';
+    }
+    if (this.el.admNoSnap) {
+      this.el.admNoSnap.textContent = this.devNoSnap ? 'NO SNAP: ON' : 'NO SNAP: OFF';
+    }
+  }
+
+  adminAddGold(amount) {
+    this.save.coins += amount;
+    this.persist();
+    this.updateHUD();
+    sound.playBuy();
+    this.setAdminStatus(`+${amount} G`);
+  }
+
+  adminUnlockAllMaps() {
+    this.save.unlockedMaps = MAPS.map((m) => m.id);
+    this.persist();
+    sound.playBuy();
+    this.setAdminStatus('ALL 4 MAPS UNLOCKED');
+  }
+
+  adminMaxGear() {
+    this.save.upgrades = { rod: 5, line: 5, lure: 5, charm: 5 };
+    this.persist();
+    sound.playBuy();
+    this.setAdminStatus('ALL GEAR LV 5');
+  }
+
+  adminFillLog() {
+    for (const sp of FISH_SPECIES) {
+      if (!this.save.log[sp.id]) {
+        this.save.log[sp.id] = { count: 1, bestKg: Number(sp.maxWeight.toFixed(2)) };
+      }
+    }
+    this.persist();
+    sound.playBuy();
+    this.setAdminStatus(`LOG ${FISH_SPECIES.length}/${FISH_SPECIES.length}`);
+  }
+
+  adminResetSave() {
+    this.save = defaultSave();
+    this.persist();
+    this.devAutoLand = false;
+    this.selectMap('harbor', true);
+    this.setAdminStatus('SAVE RESET');
+  }
+
+  adminSetTime(tod) {
+    this.timeOfDay = tod;
+    this.updateHUD();
+    sound.playJig();
+    this.setAdminStatus(`TIME ${this.el.time.textContent}`);
+  }
+
+  adminSpawnSpecies(speciesId) {
+    const sp = getSpeciesById(speciesId);
+    const f = this.spawnFish(false, sp);
+    f.x = clamp(this.pierEndX + (this.vw - this.pierEndX) * 0.55, this.pierEndX + 24, this.vw - 18);
+    this.fishes.push(f);
+    sound.playJig();
+    this.closeModals();
+    this.spawnFloat(f.x, this.waterY - 10, `SPAWNED ${sp.name.toUpperCase()}`, '#c084fc');
+    return f;
+  }
+
+  adminTriggerBite(speciesId) {
+    const sp = getSpeciesById(speciesId);
+    const f = this.spawnFish(false, sp);
+    const targetX = clamp(this.pierEndX + (this.vw - this.pierEndX) * 0.62, this.pierEndX + 36, this.vw - 20);
+    const waterH = Math.max(40, this.vh - 18 - this.waterY);
+    const targetY = clamp(this.waterY + 12 + ((sp.minDepth + sp.maxDepth) * 0.5) * (waterH - 16), this.waterY + 12, this.getSeabedY(targetX) - 8);
+    f.x = targetX;
+    f.y = targetY;
+    f.dir = -1;
+    this.fishes.push(f);
+
+    this.bobberX = targetX;
+    this.bobberY = this.waterY;
+    const mouth = this.getFishMouthPos(f);
+    this.hookX = mouth.x;
+    this.hookY = mouth.y;
+    this.castTargetX = targetX;
+    this.targetDepthY = targetY;
+    this.activeFish = f;
+    this.state = 'BITE';
+    this.biteTimer = 2.6;
+    this.closeModals();
+    sound.playBite();
+    this.spawnSplash(this.bobberX, this.waterY, 8);
+    this.spawnRipple(this.bobberX, this.waterY);
+    this.updateControlsUI();
+    return f;
   }
 
   bindEvents() {
@@ -449,6 +701,9 @@ class PierlineGame {
         this.closeModals();
       } else if (e.code === 'KeyM') {
         this.activeModal === 'maps' ? this.closeModals() : this.openModal('maps');
+      } else if (e.code === 'Backquote' || e.code === 'F9') {
+        e.preventDefault();
+        this.activeModal === 'admin' ? this.closeModals() : this.openModal('admin');
       }
     });
 
@@ -467,6 +722,9 @@ class PierlineGame {
     this.el.btnLog.addEventListener('click', () => {
       sound.unlock(); sound.playJig(); this.openModal('log');
     });
+    this.el.btnAdmin.addEventListener('click', () => {
+      sound.unlock(); sound.playJig(); this.openModal('admin');
+    });
     this.el.btnSound.addEventListener('click', () => {
       sound.unlock();
       this.save.sound = !this.save.sound;
@@ -480,8 +738,9 @@ class PierlineGame {
     this.el.btnMapsClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
     this.el.btnShopClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
     this.el.btnLogClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
+    this.el.btnAdminClose.addEventListener('click', () => { sound.playJig(); this.closeModals(); });
 
-    for (const backdrop of [this.el.mapsModal, this.el.shopModal, this.el.logModal]) {
+    for (const backdrop of [this.el.mapsModal, this.el.shopModal, this.el.logModal, this.el.adminModal]) {
       backdrop.addEventListener('click', (e) => {
         if (e.target === backdrop) { sound.playJig(); this.closeModals(); }
       });
@@ -515,7 +774,7 @@ class PierlineGame {
 
   launchCast() {
     const stats = this.getStats();
-    const minCastX = this.pierEndX + 22;
+    const minCastX = this.pierEndX + 24;
     const maxCastX = this.pierEndX + (this.vw - this.pierEndX - 18) * stats.maxCastFrac;
     this.castTargetX = clamp(lerp(minCastX, maxCastX, this.chargePower), minCastX, this.vw - 14);
 
@@ -537,17 +796,25 @@ class PierlineGame {
 
   hookFish() {
     if (!this.activeFish) return;
+    const fish = this.activeFish;
     this.state = 'REELING';
-    this.activeFish.ai = 'HOOKED';
-    this.tension = 0.28;
-    this.progress = 0.14;
+    fish.ai = 'HOOKED';
+    // Zero-jump initialization from the fish's exact current coordinates!
+    fish.vx = 0;
+    fish.vy = 0;
+    const landX = this.pierEndX + 10;
+    const landY = this.waterY + 6;
+    this.reelTotalDist = Math.max(24, Math.hypot(fish.x - landX, fish.y - landY));
+    this.tension = 0.22;
+    this.progress = 0;
     this.reelHold = true;
+    this.devAutoLand = false;
     this.fishThrashing = false;
-    this.fishFightTimer = rand(0.55, 1.15);
-    this.shakeTime = 0.18;
-    this.shakeMag = 2;
+    this.fishFightTimer = rand(0.65, 1.25);
+    this.shakeTime = 0.14;
+    this.shakeMag = 1.6;
     sound.playHookSet();
-    this.spawnSplash(this.bobberX, this.waterY, 10);
+    this.spawnSplash(this.bobberX, this.waterY, 8);
     this.spawnRipple(this.bobberX, this.waterY);
     this.spawnFloat(this.bobberX, this.waterY - 12, 'HOOKED!', '#fef08a');
     this.updateControlsUI();
@@ -558,14 +825,16 @@ class PierlineGame {
       this.activeFish.ai = 'FLEE';
       this.activeFish.fleeTimer = 2.0;
       this.activeFish.dir = 1;
+      this.activeFish.vx = 0;
+      this.activeFish.vy = 0;
       this.activeFish = null;
     }
     this.state = 'IDLE';
     this.reelHold = false;
     this.chargeHold = false;
+    this.devAutoLand = false;
     this.tension = 0;
     this.progress = 0;
-    this.rodFlex = 0;
     if (toastText) {
       this.spawnFloat(this.bobberX, this.waterY - 10, toastText, '#f87171');
     }
@@ -575,31 +844,38 @@ class PierlineGame {
   startLanding() {
     this.state = 'LANDING';
     this.reelHold = false;
+    this.devAutoLand = false;
     this.landingT = 0;
     this.landingStartX = this.activeFish.x;
     this.landingStartY = this.activeFish.y;
+    this.landingStartDir = this.activeFish.dir;
     this.spawnSplash(this.activeFish.x, this.waterY, 12);
     this.spawnRipple(this.activeFish.x, this.waterY);
-    sound.playSplash();
+    sound.playSplash(true);
     this.updateControlsUI();
   }
 
   completeCatch() {
     const sp = this.activeFish.species;
-    const weight = Number(lerp(sp.minKg, sp.maxKg, Math.pow(Math.random(), 0.72)).toFixed(2));
-    const sizeBonus = 0.85 + ((weight - sp.minKg) / Math.max(0.01, sp.maxKg - sp.minKg)) * 0.45;
-    const value = Math.max(5, Math.round(sp.value * sizeBonus * this.getStats().coinMult));
+    const minW = Number.isFinite(sp.minWeight) ? sp.minWeight : 0.2;
+    const maxW = Number.isFinite(sp.maxWeight) ? sp.maxWeight : Math.max(minW + 0.5, 1.0);
+    const weight = Number(lerp(minW, maxW, Math.pow(Math.random(), 0.72)).toFixed(2));
+    const sizeRatio = clamp((weight - minW) / Math.max(0.01, maxW - minW), 0, 1);
+    const sizeBonus = 0.85 + sizeRatio * 0.45;
+    const baseVal = Number.isFinite(sp.value) ? sp.value : 15;
+    const value = Math.max(5, Math.round(baseVal * sizeBonus * this.getStats().coinMult));
 
     const prev = this.save.log[sp.id];
     const isNew = !prev;
-    const isRecord = !prev || weight > prev.bestKg;
+    const prevBest = prev && Number.isFinite(prev.bestKg) ? prev.bestKg : 0;
+    const isRecord = !prev || weight > prevBest;
 
     this.save.log[sp.id] = {
-      count: (prev ? prev.count : 0) + 1,
-      bestKg: isRecord ? weight : prev.bestKg,
+      count: (prev && Number.isFinite(prev.count) ? prev.count : 0) + 1,
+      bestKg: isRecord ? weight : prevBest,
     };
-    this.save.coins += value;
-    this.save.totalCaught += 1;
+    this.save.coins = (Number.isFinite(this.save.coins) ? this.save.coins : 0) + value;
+    this.save.totalCaught = (Number.isFinite(this.save.totalCaught) ? this.save.totalCaught : 0) + 1;
     this.persist();
 
     this.fishes = this.fishes.filter((f) => f !== this.activeFish);
@@ -611,7 +887,7 @@ class PierlineGame {
     this.activeModal = 'catch';
     sound.playCatch(sp.rarity);
 
-    const rMeta = RARITY_META[sp.rarity];
+    const rMeta = RARITY_META[sp.rarity] || RARITY_META.common;
     this.el.catchRarity.textContent = rMeta.label;
     this.el.catchRarity.style.background = rMeta.bg;
     this.el.catchRarity.style.color = rMeta.color;
@@ -647,6 +923,9 @@ class PierlineGame {
     } else if (which === 'log') {
       this.renderLog();
       this.el.logModal.classList.remove('hidden');
+    } else if (which === 'admin') {
+      this.refreshAdminLabels();
+      this.el.adminModal.classList.remove('hidden');
     }
   }
 
@@ -654,6 +933,7 @@ class PierlineGame {
     this.el.mapsModal.classList.add('hidden');
     this.el.shopModal.classList.add('hidden');
     this.el.logModal.classList.add('hidden');
+    this.el.adminModal.classList.add('hidden');
     if (this.activeModal !== 'catch') this.activeModal = null;
   }
 
@@ -676,8 +956,8 @@ class PierlineGame {
         .map((sp) => `<img src="${this.spriteUrls[sp.id]}" class="${this.save.log[sp.id] ? '' : 'sil'}" alt="${this.save.log[sp.id] ? sp.name : 'Unknown fish'}" />`)
         .join('');
 
-      let btnLabel = isCurrent ? 'HERE' : unlocked ? 'TRAVEL' : `UNLOCK ${m.cost} G`;
-      let btnClass = isCurrent ? 'pixel-btn' : unlocked ? 'pixel-btn accent-cyan' : 'pixel-btn accent-gold';
+      const btnLabel = isCurrent ? 'HERE' : unlocked ? 'TRAVEL' : `UNLOCK ${m.cost} G`;
+      const btnClass = isCurrent ? 'pixel-btn' : unlocked ? 'pixel-btn accent-cyan' : 'pixel-btn accent-gold';
 
       card.innerHTML = `
         <div class="map-top">
@@ -717,7 +997,7 @@ class PierlineGame {
         <div class="shop-info">
           <div class="shop-title">${u.name} <span class="lv-tag">LV ${lv}/${u.maxLevel}</span></div>
           <div class="shop-desc">${u.desc}</div>
-          <div class="shop-perk">GEAR: ${u.tiers[lv - 1]}${maxed ? ' (MAX)' : ' → ' + u.tiers[lv]}</div>
+          <div class="shop-perk">GEAR: ${u.tiers[lv - 1]}${maxed ? ' (MAX)' : ' \u2192 ' + u.tiers[lv]}</div>
         </div>
         <button class="pixel-btn ${canBuy ? 'accent-gold' : ''}" type="button" ${canBuy ? '' : 'disabled'}>
           ${maxed ? 'MAX' : `${cost} G`}
@@ -744,10 +1024,9 @@ class PierlineGame {
     this.el.logGrid.innerHTML = '';
     for (const sp of FISH_SPECIES) {
       const entry = this.save.log[sp.id];
-      const rMeta = RARITY_META[sp.rarity];
-      const mapCodes = (sp.maps || ['harbor'])
-        .map((id) => getMapById(id).shortTag)
-        .join(' · ');
+      const rMeta = RARITY_META[sp.rarity] || RARITY_META.common;
+      const mapCodes = (sp.maps || ['harbor']).map((id) => getMapById(id).shortTag).join(' \u00b7 ');
+      const bestKg = entry && Number.isFinite(entry.bestKg) ? entry.bestKg : sp.minWeight;
       const card = document.createElement('div');
       card.className = `log-card ${entry ? 'discovered' : 'locked'}`;
       card.innerHTML = `
@@ -756,7 +1035,7 @@ class PierlineGame {
           <img src="${this.spriteUrls[sp.id]}" alt="${entry ? sp.name : 'Undiscovered fish'}" />
         </div>
         <div class="log-name">${entry ? sp.name : '???'}</div>
-        <div class="log-stats">${entry ? `${entry.count}x &bull; ${entry.bestKg.toFixed(2)}kg` : sp.zone.toUpperCase()}</div>
+        <div class="log-stats">${entry ? `${entry.count}x &bull; ${bestKg.toFixed(2)}kg` : sp.zone.toUpperCase()}</div>
         <div class="log-maps">${mapCodes}</div>
       `;
       this.el.logGrid.appendChild(card);
@@ -810,29 +1089,30 @@ class PierlineGame {
   }
 
   getAnglerPose() {
-    if (this.state === 'CHARGING') {
-      return this.chargePower > 0.55 ? 'charge1' : 'charge0';
-    }
-    if (this.state === 'CASTING') {
-      return this.castFollowThrough > 0 ? 'cast0' : 'cast1';
-    }
-    if (this.state === 'WAITING') {
-      return Math.floor(this.time * 1.6) % 2 === 0 ? 'wait0' : 'wait1';
-    }
-    if (this.state === 'BITE') {
-      return Math.floor(this.time * 12) % 2 === 0 ? 'bite0' : 'bite1';
-    }
+    if (this.state === 'CHARGING') return this.chargePower > 0.55 ? 'charge1' : 'charge0';
+    if (this.state === 'CASTING') return this.castFollowThrough > 0 ? 'cast0' : 'cast1';
+    if (this.state === 'WAITING') return Math.floor(this.time * 1.6) % 2 === 0 ? 'wait0' : 'wait1';
+    if (this.state === 'BITE') return Math.floor(this.time * 12) % 2 === 0 ? 'bite0' : 'bite1';
     if (this.state === 'REELING') {
-      if (this.fishThrashing && this.tension > 0.65) return 'reelHard';
-      if (this.reelHold) return Math.floor(this.time * 9) % 2 === 0 ? 'reel0' : 'reel1';
+      if (this.fishThrashing && this.tension > 0.62) return 'reelHard';
+      if (this.reelHold || this.devAutoLand) return Math.floor(this.time * 9) % 2 === 0 ? 'reel0' : 'reel1';
       return 'reel0';
     }
-    if (this.state === 'LANDING' || this.state === 'CAUGHT') {
-      return Math.floor(this.time * 5) % 2 === 0 ? 'celebrate0' : 'celebrate1';
-    }
+    if (this.state === 'LANDING') return this.landingT > 0.6 ? 'celebrate0' : 'reelHard';
+    if (this.state === 'CAUGHT') return Math.floor(this.time * 5) % 2 === 0 ? 'celebrate0' : 'celebrate1';
     const tick = Math.floor(this.time * 2.2) % 10;
     if (tick === 7) return 'idleBlink';
     return tick % 2 === 0 ? 'idle0' : 'idle1';
+  }
+
+  getTargetRodAngle() {
+    if (this.state === 'CHARGING') return lerp(-0.85, -2.42, this.chargePower);
+    if (this.state === 'CASTING') return lerp(-2.2, -0.35, Math.min(1, this.castT * 2.2));
+    if (this.state === 'BITE') return -0.34 + Math.sin(this.time * 24) * 0.06;
+    if (this.state === 'REELING') return (this.reelHold || this.devAutoLand) ? -1.04 : -0.60;
+    if (this.state === 'LANDING') return lerp(-1.04, -1.32, smoothstep(clamp(this.landingT, 0, 1)));
+    if (this.state === 'CAUGHT') return -1.32;
+    return -0.62;
   }
 
   getRodTipPos() {
@@ -843,21 +1123,8 @@ class PierlineGame {
     const handY = drawY + spr.hand[1];
     const rodLen = 27 + (this.save.upgrades.rod - 1) * 2.2;
 
-    let angle = -0.62;
-    if (this.state === 'CHARGING') {
-      angle = lerp(-0.85, -2.42, this.chargePower);
-    } else if (this.state === 'CASTING') {
-      angle = lerp(-2.2, -0.35, Math.min(1, this.castT * 2.2));
-    } else if (this.state === 'BITE') {
-      angle = -0.32 + Math.sin(this.time * 28) * 0.08;
-    } else if (this.state === 'REELING') {
-      angle = this.reelHold ? -0.96 : -0.58;
-    } else if (this.state === 'LANDING' || this.state === 'CAUGHT') {
-      angle = -1.28;
-    }
-
-    const tipBaseX = handX + Math.cos(angle) * rodLen;
-    const tipBaseY = handY + Math.sin(angle) * rodLen;
+    const tipBaseX = handX + Math.cos(this.rodAngle) * rodLen;
+    const tipBaseY = handY + Math.sin(this.rodAngle) * rodLen;
     const bend = this.rodFlex * 13;
     const tipX = tipBaseX + bend * 0.28;
     const tipY = tipBaseY + bend;
@@ -893,19 +1160,22 @@ class PierlineGame {
 
   update(dt) {
     this.time += dt;
-    this.timeOfDay = (this.timeOfDay + dt / 240) % 1;
+    if (!this.devClockFrozen) {
+      this.timeOfDay = (this.timeOfDay + dt / 240) % 1;
+    }
     if (this.castFollowThrough > 0) this.castFollowThrough = Math.max(0, this.castFollowThrough - dt);
     if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
 
+    // Smooth rod angle interpolation (no abrupt snaps across states!)
+    this.rodAngle = lerp(this.rodAngle, this.getTargetRodAngle(), 1 - Math.exp(-12 * dt));
+
     const map = this.getCurrentMap();
 
-    // Update clouds
     for (const c of this.clouds) {
       c.x += c.speed * dt;
       if (c.x > this.vw + 24) c.x = -36;
     }
 
-    // Update birds
     for (const b of this.birds) {
       b.x -= b.speed * dt;
       if (b.x < -14) {
@@ -914,7 +1184,6 @@ class PierlineGame {
       }
     }
 
-    // Update biome weather particles
     for (const wp of this.weatherParticles) {
       wp.x += wp.vx * dt;
       wp.y += wp.vy * dt;
@@ -933,7 +1202,6 @@ class PierlineGame {
       }
     }
 
-    // Ambient underwater bubbles (hot vents in Ember Caldera)
     if (Math.random() < dt * (map.id === 'abyss' ? 5.2 : 3.2)) {
       const isHot = map.id === 'abyss' && Math.random() < 0.6;
       const leftVentX = this.pierEndX + (this.vw - this.pierEndX) * 0.28 + 6;
@@ -982,7 +1250,7 @@ class PierlineGame {
       this.chargePower += this.chargeDir * dt * 1.12;
       if (this.chargePower >= 1) { this.chargePower = 1; this.chargeDir = -1; }
       if (this.chargePower <= 0.08) { this.chargePower = 0.08; this.chargeDir = 1; }
-      this.rodFlex = lerp(this.rodFlex, 0.14 * this.chargePower, dt * 8);
+      this.rodFlex = lerp(this.rodFlex, 0.14 * this.chargePower, 1 - Math.exp(-8 * dt));
     } else if (this.state === 'CASTING') {
       this.castT += dt * 1.65;
       const t = clamp(this.castT, 0, 1);
@@ -991,7 +1259,7 @@ class PierlineGame {
       this.bobberY = lerp(this.castStartY, this.waterY, t) - arc;
       this.hookX = this.bobberX;
       this.hookY = this.bobberY + 2;
-      this.rodFlex = lerp(this.rodFlex, 0.06, dt * 8);
+      this.rodFlex = lerp(this.rodFlex, 0.06, 1 - Math.exp(-8 * dt));
 
       if (t >= 1) {
         this.state = 'WAITING';
@@ -1005,18 +1273,22 @@ class PierlineGame {
       }
     } else if (this.state === 'WAITING') {
       this.bobberY = this.waterY + Math.sin(this.time * 4.2) * 1.1;
-      this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, dt * 4);
-      this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), dt * 1.85);
-      this.rodFlex = lerp(this.rodFlex, 0.04, dt * 6);
+      this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, 1 - Math.exp(-4 * dt));
+      this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-1.9 * dt));
+      this.rodFlex = lerp(this.rodFlex, 0.04, 1 - Math.exp(-6 * dt));
     } else if (this.state === 'BITE') {
       this.biteTimer -= dt;
-      this.bobberY = this.waterY + 2.5 + Math.sin(this.time * 32) * 1.6;
-      this.rodFlex = lerp(this.rodFlex, 0.52, dt * 14);
+      this.bobberY = lerp(this.bobberY, this.waterY + 2.4 + Math.sin(this.time * 26) * 1.4, 1 - Math.exp(-14 * dt));
+      this.rodFlex = lerp(this.rodFlex, 0.45, 1 - Math.exp(-10 * dt));
       if (this.activeFish) {
-        this.hookX = this.activeFish.x + this.activeFish.dir * 4;
-        this.hookY = this.activeFish.y;
+        // Gentle nibble tug motion around the hook (no jumping!)
+        this.activeFish.x += Math.sin(this.time * 22) * 8 * dt;
+        this.activeFish.y += Math.cos(this.time * 18) * 5 * dt;
+        const mouth = this.getFishMouthPos(this.activeFish);
+        this.hookX = lerp(this.hookX, mouth.x, 1 - Math.exp(-18 * dt));
+        this.hookY = lerp(this.hookY, mouth.y, 1 - Math.exp(-18 * dt));
       }
-      if (Math.random() < dt * 9) this.spawnRipple(this.bobberX, this.waterY);
+      if (Math.random() < dt * 8) this.spawnRipple(this.bobberX, this.waterY);
       if (this.biteTimer <= 0) {
         sound.playSnap();
         this.resetToIdle('GOT AWAY!');
@@ -1024,26 +1296,43 @@ class PierlineGame {
     } else if (this.state === 'REELING') {
       this.updateReeling(dt);
     } else if (this.state === 'LANDING') {
-      this.landingT += dt * 1.8;
+      this.landingT += dt * 1.72;
       const t = clamp(this.landingT, 0, 1);
-      const destX = this.anglerX + 10;
-      const destY = this.pierY - 12;
-      const arc = Math.sin(t * Math.PI) * 32;
-      this.hookX = lerp(this.landingStartX, destX, t);
-      this.hookY = lerp(this.landingStartY, destY, t) - arc;
+      const ease = smoothstep(t);
+      const dest = this.getCelebrateHandPos();
+      // Graceful curved heave out of the water straight into angler's hand (zero jump!)
+      const liftArc = Math.sin(t * Math.PI) * 26;
+      const fx = lerp(this.landingStartX, dest.x, ease);
+      const fy = lerp(this.landingStartY, dest.y, ease) - liftArc;
       if (this.activeFish) {
-        this.activeFish.x = this.hookX;
-        this.activeFish.y = this.hookY;
+        this.activeFish.x = fx;
+        this.activeFish.y = fy;
+        this.activeFish.dir = t > 0.55 ? 1 : this.landingStartDir;
       }
-      this.rodFlex = lerp(this.rodFlex, 0.25 * (1 - t), dt * 10);
+      this.hookX = fx;
+      this.hookY = fy;
+      this.rodFlex = lerp(this.rodFlex, 0.22 * (1 - ease), 1 - Math.exp(-9 * dt));
+
+      // Trailing water droplets off the lifted fish
+      if (t < 0.72 && Math.random() < dt * 20) {
+        this.particles.push({
+          x: fx + rand(-3, 3),
+          y: fy + rand(0, 3),
+          vx: rand(-10, 10),
+          vy: rand(4, 18),
+          g: 110,
+          life: rand(0.2, 0.38),
+          size: 1,
+          color: '#bae6fd',
+        });
+      }
       if (t >= 1) this.completeCatch();
     } else {
-      this.rodFlex = lerp(this.rodFlex, 0, dt * 6);
+      this.rodFlex = lerp(this.rodFlex, 0, 1 - Math.exp(-6 * dt));
     }
 
     this.updateFishAI(dt);
 
-    // Update map + zone badge
     const mapLabel = map.name.toUpperCase();
     const showDepth = this.state === 'WAITING' || this.state === 'BITE' || this.state === 'REELING';
     const band = showDepth ? this.getDepthBand(this.hookY).name : 'PIER';
@@ -1059,22 +1348,45 @@ class PierlineGame {
     if (!fish) return this.resetToIdle();
 
     const stats = this.getStats();
+    const strength = fish.species.strength;
+    const pulling = this.reelHold || this.devAutoLand;
+
+    // Fight state cycle (thrash vs calm bursts)
     this.fishFightTimer -= dt;
     if (this.fishFightTimer <= 0) {
-      this.fishThrashing = !this.fishThrashing;
-      const strength = fish.species.strength;
+      this.fishThrashing = this.devAutoLand ? false : !this.fishThrashing;
       this.fishFightTimer = this.fishThrashing
-        ? rand(0.5, 0.8 + strength * 0.22)
-        : rand(0.75, 1.45 - Math.min(0.45, strength * 0.14));
+        ? rand(0.55, 0.85 + strength * 0.24)
+        : rand(0.8, 1.5 - Math.min(0.45, strength * 0.14));
       this.updateControlsUI();
     }
 
-    const strength = fish.species.strength;
-    if (this.reelHold) {
-      const gain = (stats.reelSpeed / (0.68 + strength * 0.28)) * (this.fishThrashing ? 0.55 : 1.0);
-      this.progress += gain * dt;
-      const strain = ((this.fishThrashing ? 0.62 : 0.18) * (0.65 + strength * 0.36)) / stats.lineStrength;
-      this.tension += strain * dt;
+    // Physical landing target just off the pier water surface
+    const landX = this.pierEndX + 10;
+    const landY = this.waterY + 6;
+    const toX = landX - fish.x;
+    const toY = landY - fish.y;
+    const dist = Math.max(0.001, Math.hypot(toX, toY));
+    const nx = toX / dist;
+    const ny = toY / dist;
+
+    // Velocity-based spring + water-drag physics (completely smooth, ZERO teleport!)
+    let ax = 0;
+    let ay = 0;
+
+    if (pulling) {
+      const pullBase = (178 + (this.save.upgrades.rod - 1) * 34) / (0.64 + strength * 0.26);
+      const pullScale = this.devAutoLand ? 2.4 : (this.fishThrashing ? 0.34 : 1.0);
+      ax += nx * pullBase * pullScale;
+      // Curve upward naturally as the fish approaches the pier
+      const liftBias = dist < 50 ? 1.25 : 0.9;
+      ay += ny * pullBase * pullScale * liftBias;
+
+      // Tension rises faster if pulling during a thrash
+      const strain = ((this.fishThrashing ? 0.56 : 0.14) * (0.68 + strength * 0.34)) / stats.lineStrength;
+      this.tension = this.devNoSnap || this.devAutoLand
+        ? Math.min(0.65, this.tension + strain * dt * 0.4)
+        : this.tension + strain * dt;
 
       this.reelTickAccum += dt;
       if (this.reelTickAccum > 0.12) {
@@ -1082,41 +1394,90 @@ class PierlineGame {
         sound.playReelTick(this.tension);
       }
     } else {
-      const slip = (this.fishThrashing ? 0.08 : 0.025) * strength;
-      this.progress = Math.max(0.02, this.progress - slip * dt);
-      const cool = stats.tensionDecay * (this.fishThrashing ? 0.72 : 1.15);
+      const cool = stats.tensionDecay * (this.fishThrashing ? 0.78 : 1.22);
       this.tension = Math.max(0, this.tension - cool * dt);
     }
 
-    const targetX = lerp(this.castTargetX, this.pierEndX + 12, clamp(this.progress, 0, 1));
-    const targetY = lerp(this.targetDepthY, this.waterY + 8, clamp(this.progress, 0, 1));
-    const thrashX = this.fishThrashing ? Math.sin(this.time * 24) * 5 : Math.sin(this.time * 8) * 1.5;
-    const thrashY = this.fishThrashing ? Math.cos(this.time * 20) * 3.5 : 0;
-    fish.x = clamp(lerp(fish.x, targetX + thrashX, dt * 4.2), this.pierEndX + 6, this.vw - 8);
-    fish.y = clamp(lerp(fish.y, targetY + thrashY, dt * 4.2), this.waterY + 6, this.getSeabedY(fish.x) - 6);
-    fish.dir = this.fishThrashing ? 1 : -1;
+    // Fish resistance / swimming impulses
+    if (this.fishThrashing) {
+      const fightForce = (20 + strength * 14) * (pulling ? 0.78 : 0.95);
+      ax += fightForce; // swims away from pier (+X)
+      ay += Math.sin(this.time * 16 + fish.phase) * 32 + 6; // dives & shakes organically
+    } else if (!pulling) {
+      // Gentle water current & slow tail drift when slack
+      ax += 3 + strength * 2.5;
+      ay += Math.sin(this.time * 5 + fish.phase) * 10;
+    } else {
+      // Subtle tail wiggle while being reeled smoothly in
+      ay += Math.sin(this.time * 11 + fish.phase) * 14;
+    }
 
-    this.hookX = fish.x;
-    this.hookY = fish.y;
-    this.bobberX = lerp(this.bobberX, fish.x, dt * 5);
-    this.bobberY = this.waterY + 1 + (this.fishThrashing ? Math.sin(this.time * 28) * 2 : 0);
-    this.rodFlex = lerp(this.rodFlex, 0.35 + this.tension * 0.75, dt * 10);
+    // Apply acceleration + exponential water drag
+    const drag = Math.exp(-4.4 * dt);
+    fish.vx = (fish.vx + ax * dt) * drag;
+    fish.vy = (fish.vy + ay * dt) * drag;
 
-    if (this.fishThrashing && Math.random() < dt * 8) {
+    // Clamp max realistic speed
+    const maxSpd = this.devAutoLand ? 95 : 58;
+    const spd = Math.hypot(fish.vx, fish.vy);
+    if (spd > maxSpd) {
+      fish.vx = (fish.vx / spd) * maxSpd;
+      fish.vy = (fish.vy / spd) * maxSpd;
+    }
+
+    fish.x = clamp(fish.x + fish.vx * dt, this.pierEndX + 7, this.vw - 10);
+    const minY = this.waterY + 5;
+    const maxY = Math.max(minY + 4, this.getSeabedY(fish.x) - 6);
+    fish.y = clamp(fish.y + fish.vy * dt, minY, maxY);
+
+    // Smooth, non-flickering facing direction
+    if (fish.vx > 7) fish.dir = 1;
+    else if (fish.vx < -5) fish.dir = -1;
+
+    // Anchor hook cleanly to fish mouth & smoothly slide bobber along water surface
+    const mouth = this.getFishMouthPos(fish);
+    this.hookX = mouth.x;
+    this.hookY = mouth.y;
+    const rod = this.getRodTipPos();
+    const bobTargetX = clamp(lerp(rod.tipX, mouth.x, 0.76), this.pierEndX + 6, this.vw - 8);
+    this.bobberX = lerp(this.bobberX, bobTargetX, 1 - Math.exp(-7 * dt));
+    const bobDip = this.tension * 3.0 + (this.fishThrashing ? Math.sin(this.time * 24) * 1.2 : 0);
+    this.bobberY = lerp(this.bobberY, this.waterY + bobDip, 1 - Math.exp(-12 * dt));
+
+    // Smooth rod bend proportional to tension & pull
+    const targetFlex = (pulling ? 0.34 : 0.14) + this.tension * 0.72;
+    this.rodFlex = lerp(this.rodFlex, targetFlex, 1 - Math.exp(-9 * dt));
+
+    // Organic underwater wake bubbles & near-surface thrash spray
+    if (spd > 14 && Math.random() < dt * 10) {
+      this.bubbles.push({
+        x: fish.x - fish.dir * 5 + rand(-2, 2),
+        y: fish.y + rand(-2, 2),
+        vy: rand(14, 24),
+        wobble: rand(0, Math.PI * 2),
+        hot: false,
+      });
+    }
+    if (this.fishThrashing && Math.random() < dt * (fish.y < this.waterY + 20 ? 11 : 5)) {
       this.spawnSplash(this.bobberX, this.waterY, 3);
       this.spawnRipple(this.bobberX, this.waterY);
     }
+
+    // Real physical progress mapped directly to distance remaining
+    const newDist = Math.hypot(landX - fish.x, landY - fish.y);
+    this.reelTotalDist = Math.max(this.reelTotalDist, newDist);
+    this.progress = clamp(1 - (newDist - 9) / Math.max(14, this.reelTotalDist - 9), 0, 1);
 
     this.el.tensionFill.style.width = `${Math.round(clamp(this.tension, 0, 1) * 100)}%`;
     this.el.progressFill.style.width = `${Math.round(clamp(this.progress, 0, 1) * 100)}%`;
     this.el.tensionFill.classList.toggle('danger', this.tension > 0.78);
 
-    if (this.tension >= 1) {
+    if (!this.devNoSnap && this.tension >= 1) {
       sound.playSnap();
       this.shakeTime = 0.25;
       this.shakeMag = 3;
       this.resetToIdle('LINE SNAPPED!');
-    } else if (this.progress >= 1) {
+    } else if (newDist <= 9.5 || this.progress >= 0.995) {
       this.startLanding();
     }
   }
@@ -1137,17 +1498,18 @@ class PierlineGame {
           f.ai = 'CRUISE';
           continue;
         }
-        const dx = this.hookX - f.x;
-        const dy = this.hookY - f.y;
+        const mouth = this.getFishMouthPos(f);
+        const dx = this.hookX - mouth.x;
+        const dy = this.hookY - mouth.y;
         const dist = Math.hypot(dx, dy);
         f.dir = dx >= 0 ? 1 : -1;
-        if (dist > 4) {
+        if (dist > 3.5) {
           f.x += (dx / dist) * f.speed * 1.45 * dt;
           f.y += (dy / dist) * f.speed * 1.45 * dt;
         } else {
           this.activeFish = f;
           this.state = 'BITE';
-          this.biteTimer = clamp(1.45 - f.species.strength * 0.08 + stats.biteBonus, 0.9, 2.0);
+          this.biteTimer = clamp(1.45 - f.species.strength * 0.08 + stats.biteBonus, 0.95, 2.0);
           sound.playBite();
           this.spawnSplash(this.bobberX, this.waterY, 8);
           this.spawnRipple(this.bobberX, this.waterY);
