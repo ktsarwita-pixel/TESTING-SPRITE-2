@@ -355,11 +355,7 @@ function renderUnderwaterBg(g, ctx, map, pal) {
     }
   } else if (map.id === 'fjord') {
     const crys = g.sprites.props.iceCrystal;
-    ctx.save();
-    ctx.globalAlpha = 0.22 + 0.12 * Math.sin(g.time * 3);
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillRect(leftSpotX - 2, g.getSeabedY(leftSpotX + 4) - crys.height - 1, crys.width + 4, crys.height + 2);
-    ctx.restore();
+
     ctx.drawImage(crys, leftSpotX, g.getSeabedY(leftSpotX + 4) - crys.height + 1);
     if (g.vw > 210) {
       ctx.globalAlpha = 0.65;
@@ -638,22 +634,23 @@ function renderFishes(g, ctx, pal) {
       ctx.globalAlpha = clamp(0.97 - depthRatio * 0.20 - pal.night * 0.10, 0.62, 0.98);
     }
 
-    // Bioluminescent aura behind special deep-sea species
-    if (f.species.id === 'leviathan') {
+    ctx.drawImage(img, dx, dy);
+
+    // Subtle organic 1px bioluminescent sparks trailing special species (no rectangular box!)
+    if (f.species.id === 'leviathan' || f.species.id === 'magmaeel') {
+      const sparkColor = f.species.id === 'leviathan' ? '#7dd3fc' : '#fde047';
       ctx.save();
-      ctx.globalAlpha = 0.24 + 0.12 * Math.sin(g.time * 5 + f.phase);
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(dx - 2, dy + 1, sprSet.w + 4, sprSet.h - 2);
-      ctx.restore();
-    } else if (f.species.id === 'magmaeel') {
-      ctx.save();
-      ctx.globalAlpha = 0.15 + 0.08 * Math.sin(g.time * 7 + f.phase);
-      ctx.fillStyle = '#fb923c';
-      ctx.fillRect(dx + 4, dy + 2, sprSet.w - 8, sprSet.h - 4);
+      ctx.fillStyle = sparkColor;
+      for (let s = 0; s < 2; s++) {
+        const t = g.time * 4.5 + f.phase + s * 3.1;
+        const alpha = 0.35 + 0.5 * (0.5 + 0.5 * Math.sin(t * 2));
+        ctx.globalAlpha = alpha;
+        const sx = Math.round(f.x - f.dir * (6 + s * 5) + Math.sin(t) * 2);
+        const sy = Math.round(f.y + Math.cos(t * 1.3 + s) * 3);
+        ctx.fillRect(sx, sy, 1, 1);
+      }
       ctx.restore();
     }
-
-    ctx.drawImage(img, dx, dy);
 
     if (f.species.id === 'angler') {
       const glow = 0.35 + 0.28 * Math.sin(g.time * 6 + f.phase);

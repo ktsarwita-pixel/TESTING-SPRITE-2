@@ -120,6 +120,8 @@ class PierlineGame {
     this.targetDepthY = 92;
     this.rodFlex = 0;
     this.rodAngle = -0.62;
+    this.smoothHandX = null;
+    this.smoothHandY = null;
     this.castFollowThrough = 0;
 
     // Realistic bite, reeling & landing state
@@ -1171,8 +1173,8 @@ class PierlineGame {
     const pose = this.getAnglerPose();
     const spr = this.sprites.angler[pose] || this.sprites.angler.idle0;
     const drawY = this.pierY - spr.h + 1;
-    const handX = this.anglerX + spr.hand[0];
-    const handY = drawY + spr.hand[1];
+    const handX = this.smoothHandX !== null ? this.smoothHandX : (this.anglerX + spr.hand[0]);
+    const handY = this.smoothHandY !== null ? this.smoothHandY : (drawY + spr.hand[1]);
     const rodLen = 27 + (this.save.upgrades.rod - 1) * 2.2;
 
     const tipBaseX = handX + Math.cos(this.rodAngle) * rodLen;
@@ -1220,6 +1222,15 @@ class PierlineGame {
 
     // Smooth rod angle interpolation (no abrupt snaps across states!)
     this.rodAngle = lerp(this.rodAngle, this.getTargetRodAngle(), 1 - Math.exp(-12 * dt));
+    const curPose = this.getAnglerPose();
+    const curSpr = this.sprites.angler[curPose] || this.sprites.angler.idle0;
+    const rawHX = this.anglerX + curSpr.hand[0];
+    const rawHY = (this.pierY - curSpr.h + 1) + curSpr.hand[1];
+    if (this.smoothHandX === null) { this.smoothHandX = rawHX; this.smoothHandY = rawHY; }
+    else {
+      this.smoothHandX = lerp(this.smoothHandX, rawHX, 1 - Math.exp(-18 * dt));
+      this.smoothHandY = lerp(this.smoothHandY, rawHY, 1 - Math.exp(-18 * dt));
+    }
 
     const map = this.getCurrentMap();
 
