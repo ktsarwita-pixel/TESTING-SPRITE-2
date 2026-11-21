@@ -128,13 +128,35 @@
 
     <!-- Fish Log modal -->
     <div id="log-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
-      <div class="pixel-panel modal-panel">
-        <div class="modal-header">
-          <h2 id="log-title">FISH LOG</h2>
-          <span id="log-count" class="modal-sub">0 / 26</span>
+      <div class="pixel-panel modal-panel log-panel">
+        <div class="modal-header log-header">
+          <div class="log-title-wrap">
+            <span class="log-badge">GUIDE</span>
+            <h2 id="log-title">FISH LOG</h2>
+          </div>
+          <span id="log-count" class="log-count-pill">0 / 26</span>
           <button id="btn-log-close" class="pixel-btn close-btn" type="button" aria-label="Close Fish Log">X</button>
         </div>
-        <div id="log-grid" class="modal-body log-grid"></div>
+
+        <!-- Global Field Guide Summary Strip -->
+        <div id="log-summary" class="log-summary">
+          <span class="log-sum-stat">FOUND <b id="log-sum-found" class="c-teal">0%</b></span>
+          <span class="log-sum-stat">CAUGHT <b id="log-sum-total" class="c-cyan">0</b></span>
+          <span class="log-sum-stat">HEAVIEST <b id="log-sum-heavy" class="c-gold">--</b></span>
+          <span class="log-sum-stat">TOP TIER <b id="log-sum-tier">--</b></span>
+        </div>
+
+        <!-- Section Tabs: All Maps + Each Individual Map -->
+        <div id="log-tabs" class="log-tabs" role="tablist" aria-label="Fish log map sections"></div>
+
+        <!-- Active Section Header & Progress -->
+        <div id="log-section-bar" class="log-section-bar"></div>
+
+        <!-- Rarity-Sorted Fish List (Myth at Top -> Common at Bottom) -->
+        <div id="log-grid" class="modal-body log-body"></div>
+
+        <!-- Compact Selected Fish Info Footer -->
+        <div id="log-detail" class="log-detail">TAP ANY FISH FOR HABITAT &amp; RECORD INFO</div>
       </div>
     </div>
 

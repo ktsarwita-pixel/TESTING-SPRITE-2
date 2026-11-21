@@ -257,7 +257,14 @@ class PierlineGame {
       btnShopClose: document.getElementById('btn-shop-close'),
       logModal: document.getElementById('log-modal'),
       logCount: document.getElementById('log-count'),
+      logTabs: document.getElementById('log-tabs'),
+      logSectionBar: document.getElementById('log-section-bar'),
       logGrid: document.getElementById('log-grid'),
+      logDetail: document.getElementById('log-detail'),
+      logSumFound: document.getElementById('log-sum-found'),
+      logSumTotal: document.getElementById('log-sum-total'),
+      logSumHeavy: document.getElementById('log-sum-heavy'),
+      logSumTier: document.getElementById('log-sum-tier'),
       btnLogClose: document.getElementById('btn-log-close'),
       adminModal: document.getElementById('admin-modal'),
       adminStatus: document.getElementById('admin-status'),
@@ -1541,27 +1548,222 @@ class PierlineGame {
     }
   }
 
+  getMapShortLabel(mapId) {
+    const labels = {
+      harbor: 'PIER',
+      lagoon: 'LAGOON',
+      fjord: 'FJORD',
+      abyss: 'CALDERA',
+      sanctuary: 'RUINS',
+    };
+    return labels[mapId] || getMapById(mapId).name.toUpperCase();
+  }
+
   renderLog() {
-    const discovered = Object.keys(this.save.log).length;
-    this.el.logCount.textContent = `${discovered} / ${FISH_SPECIES.length}`;
-    this.el.logGrid.innerHTML = '';
+    if (!this.logTab) this.logTab = 'all';
+    const rarityOrder = ['myth', 'legendary', 'epic', 'rare', 'uncommon', 'common'];
+    const discoveredTotal = Object.keys(this.save.log).length;
+    const pctAll = FISH_SPECIES.length ? Math.round((discoveredTotal / FISH_SPECIES.length) * 100) : 0;
+    this.el.logCount.textContent = `${discoveredTotal} / ${FISH_SPECIES.length}`;
+
+    // Global summary telemetry strip
+    if (this.el.logSumFound) this.el.logSumFound.textContent = `${pctAll}%`;
+    if (this.el.logSumTotal) this.el.logSumTotal.textContent = `${this.save.totalCaught}`;
+    let heaviestKg = 0;
+    let heaviestName = '';
+    let topTier = null;
     for (const sp of FISH_SPECIES) {
       const entry = this.save.log[sp.id];
-      const rMeta = RARITY_META[sp.rarity] || RARITY_META.common;
-      const mapCodes = (sp.maps || ['harbor']).map((id) => getMapById(id).shortTag).join(' \u00b7 ');
-      const bestKg = entry && Number.isFinite(entry.bestKg) ? entry.bestKg : sp.minWeight;
-      const card = document.createElement('div');
-      card.className = `log-card ${entry ? 'discovered' : 'locked'}`;
-      card.innerHTML = `
-        <div class="log-rarity" style="color:${entry ? rMeta.color : '#64748b'}">${rMeta.label}</div>
-        <div class="log-img-wrap">
-          <img src="${this.spriteUrls[sp.id]}" alt="${entry ? sp.name : 'Undiscovered fish'}" />
+      if (!entry) continue;
+      if (Number.isFinite(entry.bestKg) && entry.bestKg > heaviestKg) {
+        heaviestKg = entry.bestKg;
+        heaviestName = sp.name;
+      }
+      if (!topTier || rarityOrder.indexOf(sp.rarity) < rarityOrder.indexOf(topTier)) {
+        topTier = sp.rarity;
+      }
+    }
+    if (this.el.logSumHeavy) {
+      this.el.logSumHeavy.textContent = heaviestKg > 0 ? `${heaviestKg.toFixed(1)}kg` : '--';
+      this.el.logSumHeavy.title = heaviestName || '';
+    }
+    if (this.el.logSumTier) {
+      if (topTier && RARITY_META[topTier]) {
+        this.el.logSumTier.textContent = RARITY_META[topTier].label;
+        this.el.logSumTier.style.color = RARITY_META[topTier].color;
+      } else {
+        this.el.logSumTier.textContent = '--';
+        this.el.logSumTier.style.color = '#94a3b8';
+      }
+    }
+
+    // Build tabs: ALL MAPS + each individual map section
+    if (this.el.logTabs) {
+      this.el.logTabs.innerHTML = '';
+      const tabDefs = [
+        { id: 'all', label: 'ALL MAPS', accent: '#fde047', species: FISH_SPECIES, isCurrent: false },
+        ...MAPS.map((m) => ({
+          id: m.id,
+          label: this.getMapShortLabel(m.id),
+          fullName: m.name,
+          accent: m.accent,
+          species: FISH_SPECIES.filter((sp) => (sp.maps || ['harbor']).includes(m.id)),
+          isCurrent: this.save.currentMap === m.id,
+        })),
+      ];
+
+      for (const td of tabDefs) {
+        const foundInTab = td.species.filter((sp) => Boolean(this.save.log[sp.id])).length;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.role = 'tab';
+        const active = this.logTab === td.id;
+        btn.className = `log-tab${active ? ' is-active' : ''}${td.isCurrent ? ' is-here' : ''}`;
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        btn.style.setProperty('--tab-accent', td.accent);
+        btn.title = td.fullName ? `${td.fullName} (${foundInTab}/${td.species.length})` : `All Maps (${foundInTab}/${td.species.length})`;
+        btn.innerHTML = `
+          <span class="log-tab-dot" style="background:${td.accent}"></span>
+          <span>${td.label}</span>
+          <span class="log-tab-cnt">${foundInTab}/${td.species.length}</span>
+        `;
+        btn.addEventListener('click', () => {
+          sound.unlock();
+          if (this.logTab !== td.id) {
+            this.logTab = td.id;
+            sound.playUiTab();
+            this.renderLog();
+          }
+        });
+        this.el.logTabs.appendChild(btn);
+      }
+    }
+
+    // Filter active section species
+    const activeMap = this.logTab === 'all' ? null : getMapById(this.logTab);
+    const list = activeMap
+      ? FISH_SPECIES.filter((sp) => (sp.maps || ['harbor']).includes(activeMap.id))
+      : FISH_SPECIES.slice();
+
+    const secFound = list.filter((sp) => Boolean(this.save.log[sp.id])).length;
+    const secPct = list.length ? Math.round((secFound / list.length) * 100) : 0;
+    const secAccent = activeMap ? activeMap.accent : '#fde047';
+
+    // Section header bar with progress + rarity pills (Myth -> Common)
+    if (this.el.logSectionBar) {
+      const titleText = activeMap ? `${activeMap.name.toUpperCase()} (${activeMap.subtitle.toUpperCase()})` : 'ALL MAPS COLLECTION';
+      const pillsHtml = rarityOrder.map((rar) => {
+        const tierList = list.filter((sp) => sp.rarity === rar);
+        if (!tierList.length) return '';
+        const tierFound = tierList.filter((sp) => Boolean(this.save.log[sp.id])).length;
+        const meta = RARITY_META[rar];
+        return `<span class="log-tier-pill" style="color:${meta.color};border-color:${tierFound === tierList.length ? meta.color : '#2a3e5e'}">${meta.label} ${tierFound}/${tierList.length}</span>`;
+      }).join('');
+
+      this.el.logSectionBar.innerHTML = `
+        <div class="log-sec-top">
+          <span class="log-sec-title"><span class="log-tab-dot" style="background:${secAccent}"></span>${titleText}</span>
+          <span class="log-sec-order">MYTH &uarr; &rarr; COMMON &darr; &bull; ${secFound}/${list.length} (${secPct}%)</span>
         </div>
-        <div class="log-name">${entry ? sp.name : '???'}</div>
-        <div class="log-stats">${entry ? `${entry.count}x &bull; ${bestKg.toFixed(2)}kg` : sp.zone.toUpperCase()}</div>
-        <div class="log-maps">${mapCodes}</div>
+        <div class="log-prog-track"><div class="log-prog-fill" style="width:${secPct}%;background:${secAccent}"></div></div>
+        <div class="log-tier-pills">${pillsHtml}</div>
       `;
-      this.el.logGrid.appendChild(card);
+    }
+
+    // Group & sort strictly from MYTH (top) down to COMMON (bottom)
+    this.el.logGrid.innerHTML = '';
+    for (const rar of rarityOrder) {
+      const tierFish = list
+        .filter((sp) => sp.rarity === rar)
+        .sort((a, b) => (b.value - a.value) || (b.maxWeight - a.maxWeight) || a.name.localeCompare(b.name));
+      if (!tierFish.length) continue;
+
+      const rMeta = RARITY_META[rar] || RARITY_META.common;
+      const tierFound = tierFish.filter((sp) => Boolean(this.save.log[sp.id])).length;
+
+      const group = document.createElement('div');
+      group.className = 'log-tier-group';
+      group.innerHTML = `
+        <div class="log-tier-head">
+          <span class="log-tier-tag" style="background:${rMeta.bg};color:${rMeta.color}">${rMeta.label}</span>
+          <span class="log-tier-line"></span>
+          <span class="log-tier-count">${tierFound} / ${tierFish.length}</span>
+        </div>
+      `;
+
+      const grid = document.createElement('div');
+      grid.className = 'log-grid';
+
+      for (const sp of tierFish) {
+        const entry = this.save.log[sp.id];
+        const bestKg = entry && Number.isFinite(entry.bestKg) ? entry.bestKg : sp.minWeight;
+        const isTopTier = rar === 'myth' || rar === 'legendary';
+        const isSelected = this.selectedLogFishId === sp.id;
+        const mapChipsHtml = (sp.maps || ['harbor']).map((mId) => {
+          const m = getMapById(mId);
+          return `<span class="log-map-chip" style="color:${m.accent}">${this.getMapShortLabel(mId)}</span>`;
+        }).join('');
+
+        const card = document.createElement('div');
+        card.className = `log-card ${entry ? 'discovered' : 'locked'}${isTopTier ? ' is-top-tier' : ''}${isSelected ? ' is-selected' : ''}`;
+        card.style.setProperty('--rar-color', entry ? rMeta.color : '#334155');
+        card.innerHTML = `
+          <div class="log-img-wrap">
+            <img src="${this.spriteUrls[sp.id]}" alt="${entry ? sp.name : 'Undiscovered fish'}" />
+          </div>
+          <div class="log-name">${entry ? sp.name : '???'}</div>
+          <div class="log-stats">${entry ? `${entry.count}x &bull; ${bestKg.toFixed(2)}kg` : sp.zone.toUpperCase()}</div>
+          ${entry ? `<div class="log-value">${sp.value}G &bull; ${sp.zone.toUpperCase()}</div>` : ''}
+          <div class="log-maps">${mapChipsHtml}</div>
+        `;
+        card.addEventListener('click', () => {
+          sound.unlock();
+          sound.playUiClick();
+          this.selectedLogFishId = sp.id;
+          this.el.logGrid.querySelectorAll('.log-card.is-selected').forEach((el) => el.classList.remove('is-selected'));
+          card.classList.add('is-selected');
+          this.renderLogDetail(sp);
+        });
+        grid.appendChild(card);
+      }
+
+      group.appendChild(grid);
+      this.el.logGrid.appendChild(group);
+    }
+
+    // Keep footer detail synced if a fish in the active tab is selected
+    const selectedSp = list.find((sp) => sp.id === this.selectedLogFishId) || null;
+    this.renderLogDetail(selectedSp);
+  }
+
+  renderLogDetail(sp) {
+    if (!this.el.logDetail) return;
+    if (!sp) {
+      this.el.logDetail.innerHTML = 'TAP ANY FISH CARD TO INSPECT HABITAT, DEPTH &amp; RECORD';
+      return;
+    }
+    const entry = this.save.log[sp.id];
+    const rMeta = RARITY_META[sp.rarity] || RARITY_META.common;
+    const habitatNames = (sp.maps || ['harbor']).map((id) => getMapById(id).name).join(', ');
+    if (entry) {
+      const bestKg = Number.isFinite(entry.bestKg) ? entry.bestKg : sp.minWeight;
+      this.el.logDetail.innerHTML = `
+        <div class="log-detail-head">
+          <span style="color:${rMeta.color}">[${rMeta.label}]</span>
+          <span>${sp.name.toUpperCase()}</span>
+          <span class="log-detail-meta">${sp.value}G &bull; BEST ${bestKg.toFixed(2)}KG &bull; ${sp.minWeight}-${sp.maxWeight}KG</span>
+        </div>
+        <div class="log-detail-desc">${sp.desc} &mdash; <b>${sp.zone}</b> (${habitatNames})</div>
+      `;
+    } else {
+      this.el.logDetail.innerHTML = `
+        <div class="log-detail-head">
+          <span style="color:${rMeta.color}">[${rMeta.label}]</span>
+          <span>UNDISCOVERED SPECIES</span>
+          <span class="log-detail-meta">ZONE: ${sp.zone.toUpperCase()}</span>
+        </div>
+        <div class="log-detail-desc">Rumored to swim in <b>${habitatNames}</b> (${sp.zone.toLowerCase()} waters).</div>
+      `;
     }
   }
 
