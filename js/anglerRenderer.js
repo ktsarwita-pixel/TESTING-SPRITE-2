@@ -138,86 +138,81 @@ export function computeAnglerRig(g) {
   const sinA = Math.sin(rodAngle);
 
   const wf = g.landingWeightFactor ?? 0.35;
-  const twoHandCatch = wf >= 0.40;
+  const twoHandCatch = false; // Clean iconic silhouette: back hand rests rod over rear shoulder, front arm proudly extends fish clear of body & face!
   let gripX, gripY, reelX, reelY;
-  let catchHoldX = shoulderX + 8.5;
+  let catchHoldX = shoulderX + 13.5;
   let catchHoldY = shoulderY + 0.5;
   let tuck = 0;
 
   if (g.state === 'CAUGHT' || g.state === 'LANDING') {
     const t = g.state === 'CAUGHT' ? 1 : clamp(g.landingT || 0, 0, 1);
 
-    // Beat 1 (0..0.34): two-handed heavy rod heave starting seamlessly from exact REELING hand offsets (0.00px jump!)
+    // Beat 1 (0..0.42): smooth natural rod heave starting from exact REELING hand offsets (0.00px snap!)
     const initGDX = Number.isFinite(g.landingInitGripDX) ? g.landingInitGripDX : 5.6;
     const initGDY = Number.isFinite(g.landingInitGripDY) ? g.landingInitGripDY : 1.2;
-    const initRDX = Number.isFinite(g.landingInitReelDX) ? g.landingInitReelDX : (initGDX - cosA * 3.4);
-    const initRDY = Number.isFinite(g.landingInitReelDY) ? g.landingInitReelDY : (initGDY - sinA * 3.4 + 0.4);
-    const heaveP = smoothstep(clamp(t / 0.34, 0, 1));
-    const heaveTargetGX = shoulderX + 4.1;
-    const heaveTargetGY = shoulderY - 1.9 - wf * 0.6;
-    const heaveGripX = lerp(shoulderX + initGDX, heaveTargetGX, heaveP);
-    const heaveGripY = lerp(shoulderY + initGDY, heaveTargetGY, heaveP);
-    const heaveReelX = lerp(shoulderX + initRDX, heaveTargetGX - cosA * 3.1, heaveP);
-    const heaveReelY = lerp(shoulderY + initRDY, heaveTargetGY - sinA * 3.1 + 0.3, heaveP);
+    const initRDX = Number.isFinite(g.landingInitReelDX) ? g.landingInitReelDX : (initGDX - cosA * 3.0);
+    const initRDY = Number.isFinite(g.landingInitReelDY) ? g.landingInitReelDY : (initGDY - sinA * 3.0 + 0.4);
+    const heaveP = smoothstep(clamp(t / 0.42, 0, 1));
+    const heaveGX = lerp(shoulderX + initGDX, shoulderX + 4.6, heaveP);
+    const heaveGY = lerp(shoulderY + initGDY, shoulderY - 0.8 - wf * 0.4, heaveP);
+    const heaveRX = lerp(shoulderX + initRDX, shoulderX + 2.8, heaveP);
+    const heaveRY = lerp(shoulderY + initRDY, shoulderY + 1.4, heaveP);
 
-    // Beat 2 (0.34..0.55): natural forward intercept right in front of the chest (keeps face 100% clear!)
-    const catchImpact = g.state === 'LANDING'
-      ? Math.exp(-Math.pow((t - 0.56) / 0.08, 2)) * (0.8 + wf * 1.3)
+    // Outstretched NEAR/FRONT hand (reelX, reelY) catches and displays the fish cleanly in front of the angler!
+    // Back/FAR hand (gripX, gripY) NEVER lets go of the rod — smoothly tucks it behind the rear shoulder!
+    const catchDip = g.state === 'LANDING'
+      ? Math.exp(-Math.pow((t - 0.62) / 0.08, 2)) * (0.65 + wf * 0.85)
       : 0;
-    const meetX = twoHandCatch ? shoulderX + 6.4 : shoulderX + 7.4;
-    const meetY = shoulderY + 2.4 + wf * 1.1 + catchImpact;
-
-    // Beat 3 (0.55..1.0) & CAUGHT: REALISTIC FISHERMAN TROPHY POSE!
-    // - Small/medium fish: proudly held out at arm's length in front of chest (smiling face & hat 100% unobstructed!)
-    // - Heavy beasts: cradled proudly across front chest/waist in BOTH HANDS with slight back counterbalance lean!
     const ct = g.state === 'CAUGHT' ? (g.catchTime || 0) : 0;
-    const bob = g.state === 'CAUGHT' ? Math.sin(ct * 4.6) * (0.55 + wf * 0.25) : 0;
-    const celX = twoHandCatch ? shoulderX + 6.8 : shoulderX + 8.0;
-    const celY = (twoHandCatch ? shoulderY + 2.2 : shoulderY - 0.3) + bob;
+    const bob = g.state === 'CAUGHT' ? Math.sin(ct * 3.8) * 0.65 : 0;
 
+    // Comfortably within 8.4px of frontShoulder (shoulderX - 1.4, shoulderY + 0.8): zero hyper-extension!
+    const handMeetX = shoulderX + 6.4;
+    const handMeetY = shoulderY + 1.6 + catchDip;
+    const handProudX = shoulderX + 6.9;
+    const handProudY = shoulderY - 0.5 + bob;
     const raiseP = g.state === 'CAUGHT'
       ? 1
-      : t <= 0.55
+      : t <= 0.62
         ? 0
-        : smoothstep(clamp((t - 0.55) / 0.45, 0, 1));
+        : smoothstep(clamp((t - 0.62) / 0.38, 0, 1));
 
-    catchHoldX = lerp(meetX, celX, raiseP);
-    catchHoldY = lerp(meetY, celY, raiseP);
+    const holdHandX = lerp(handMeetX, handProudX, raiseP);
+    const holdHandY = lerp(handMeetY, handProudY, raiseP);
 
-    if (t < 0.34) {
-      gripX = heaveGripX;
-      gripY = heaveGripY;
-      reelX = heaveReelX;
-      reelY = heaveReelY;
+    // Position fish so its LEFT edge stays strictly clear of face & torso for EVERY species (14px minnow to 56px kraken!)
+    const fishObj = g.state === 'CAUGHT'
+      ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
+      : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]);
+    const sprW = fishObj ? (fishObj.w || fishObj.right[0].width || 20) : 20;
+    const gripInset = Math.min(3.2, sprW * 0.18);
+    catchHoldX = holdHandX + sprW * 0.5 - gripInset;
+    catchHoldY = holdHandY + 0.5;
+
+    // Back hand resting position behind the rear shoulder (cozy ~5.0px reach from backShoulder!)
+    const rodRestX = shoulderX - 3.6;
+    const rodRestY = shoulderY + 2.2;
+
+    if (t < 0.42) {
+      gripX = heaveGX;
+      gripY = heaveGY;
+      reelX = heaveRX;
+      reelY = heaveRY;
       tuck = 0;
-    } else if (t < 0.55) {
-      // Smoothly swing front hand to intercept fish while back hand tucks the rod neatly behind shoulder!
-      const swP = smoothstep((t - 0.34) / 0.21);
+    } else if (t < 0.62) {
+      // Smooth non-crossing choreography: back hand tucks rod behind shoulder, front hand reaches out to catch fish!
+      const swP = smoothstep((t - 0.42) / 0.20);
       tuck = swP;
-      const targetGripX = twoHandCatch ? catchHoldX + 2.0 : catchHoldX;
-      const targetGripY = twoHandCatch ? catchHoldY + 1.4 : catchHoldY + 0.6;
-      gripX = lerp(heaveGripX, targetGripX, swP);
-      gripY = lerp(heaveGripY, targetGripY, swP);
-      const tuckedX = shoulderX - 3.2;
-      const tuckedY = hipY - 2.8;
-      reelX = lerp(heaveReelX, tuckedX, swP);
-      reelY = lerp(heaveReelY, tuckedY, swP);
+      gripX = lerp(heaveGX, rodRestX, swP);
+      gripY = lerp(heaveGY, rodRestY, swP);
+      reelX = lerp(heaveRX, holdHandX, swP);
+      reelY = lerp(heaveRY, holdHandY, swP);
     } else {
       tuck = 1;
-      if (twoHandCatch) {
-        // Heavy fish: BOTH hands naturally cradle the trophy across the front of the torso (inside comfortable IK reach!)
-        const cradleP = smoothstep(clamp((t - 0.55) / 0.24, 0, 1));
-        gripX = catchHoldX + 2.0;
-        gripY = catchHoldY + 1.4;
-        reelX = lerp(shoulderX - 3.2, catchHoldX - 2.4, cradleP);
-        reelY = lerp(hipY - 2.8, catchHoldY + 1.8, cradleP);
-      } else {
-        // Light/medium fish: proud one-hand trophy display out front; back hand rests cleanly on the tucked rod butt!
-        gripX = catchHoldX;
-        gripY = catchHoldY + 0.6;
-        reelX = shoulderX - 3.2;
-        reelY = hipY - 2.8;
-      }
+      gripX = rodRestX;
+      gripY = rodRestY;
+      reelX = holdHandX;
+      reelY = holdHandY;
     }
   } else if (g.state === 'IDLE') {
     // Relaxed, natural two-hand ready grip cleanly spaced along the cork rod handle
@@ -256,7 +251,7 @@ export function computeAnglerRig(g) {
       (g.state === 'WAITING' && g.retrieving);
 
     if (isCranking) {
-      const crankR = 2.4;
+      const crankR = 1.9;
       const ca = g.crankAngle || 0;
       reelX = seatX + Math.cos(ca) * crankR;
       reelY = seatY + Math.sin(ca) * crankR;
@@ -270,10 +265,10 @@ export function computeAnglerRig(g) {
     }
   }
 
-  // Rod butt/tip anchored to gripping hand; smoothly tucks behind left shoulder during LANDING -> CAUGHT
+  // Rod butt/tip stays 100% locked in the back gripping hand (gripX, gripY) — ZERO floating rod or hand swap!
   const rodLen = 28 + ((g.save && g.save.upgrades && g.save.upgrades.rod ? g.save.upgrades.rod : 1) - 1) * 2.2;
-  const rodHandX = lerp(gripX, shoulderX - 4.4, tuck);
-  const rodHandY = lerp(gripY, shoulderY + 1.0, tuck);
+  const rodHandX = gripX;
+  const rodHandY = gripY;
   const tipBaseX = rodHandX + cosA * rodLen;
   const tipBaseY = rodHandY + sinA * rodLen;
   const bend = (g.rodFlex || 0) * 14.5;
@@ -422,45 +417,39 @@ function drawSculptedHeadAndHat(ctx, g, rig) {
   // Warm ear pixel
   px(ctx, hx - 1, hy, '#e6a882', 1, 1);
 
-  // Expressive eye + subtle mood (blinking, water-gaze, strain-squint, happy catch smile!)
-  const blinking = (g.time % 4.3) > 4.16;
+  // Expressive CRISP ALWAYS-VISIBLE EYE on row hy-1 (NEVER disappears into hair!)
+  const blinking = (g.time % 4.6) > 4.48 && g.state === 'IDLE';
   const straining =
     (g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72)) ||
-    (g.state === 'LANDING' && (g.landingT || 0) < 0.34);
-  const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && (g.landingT || 0) > 0.52);
+    (g.state === 'LANDING' && (g.landingT || 0) < 0.42);
+  const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && (g.landingT || 0) >= 0.62);
 
-  if (blinking || happy) {
-    // Happy curved squint-eye (lifts 1px looking up at trophy!) or gentle blink
-    px(ctx, hx + 1, hy - (happy ? 2 : 1), '#4a2616', 2, 1);
-    if (happy) {
-      // Warm celebratory grin & rosy cheek!
-      px(ctx, hx + 1, hy + 1, '#b55b48', 2, 1);
-      px(ctx, hx + 2, hy, '#f7c8a4', 1, 1);
-      px(ctx, hx, hy, '#eb9482', 1, 1); // rosy happy cheek
-    }
-  } else if (straining) {
-    // Focused determined furrowed brow during heavy heave/fight!
+  if (blinking) {
+    // Brief natural idle blink right on the eye row
     px(ctx, hx + 1, hy - 1, '#3b1e11', 2, 1);
-    px(ctx, hx + 2, hy, '#1b1d2b', 1, 1);
+  } else if (happy) {
+    // Bright sparkling joyful eye right on row hy-1 (100% readable!) + happy warm grin + rosy cheek
+    px(ctx, hx + 1, hy - 1, '#ffffff', 1, 1);
+    px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
+    px(ctx, hx, hy, '#eb8a78', 1, 1);      // rosy happy cheek
+    px(ctx, hx + 1, hy + 1, '#b54d3e', 2, 1); // crisp celebratory smile
+  } else if (straining) {
+    // Determined focused eye right on row hy-1 (crisp white + dark pupil, furrowed brow glint)
+    px(ctx, hx + 1, hy - 1, '#fff5eb', 1, 1);
+    px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
     px(ctx, hx + 1, hy + 1, '#a85745', 1, 1);
   } else {
-    // Bright readable eye tracking toward water/bobber or incoming fish!
+    // Crisp bright readable eye tracking toward the water/bobber
     const lookDown = (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING');
-    px(ctx, hx + 1, hy - 1, '#fffaf5', 1, 1);
-    px(ctx, hx + 2, hy - 1, '#1f2336', 1, 1);
-    if (lookDown) px(ctx, hx + 1, hy, '#e89b84', 1, 1); // soft cheek blush
+    px(ctx, hx + 1, hy - 1, '#ffffff', 1, 1);
+    px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
+    if (lookDown) px(ctx, hx + 1, hy, '#e89b84', 1, 1);
   }
 
-  // Curved woven coastal straw sun-hat (domed crown + upturned brim + dynamic catch bounce & fluttering red ribbon!)
-  const hatTilt = Math.round(clamp((g.animLean || 0) * 0.22 - (happy ? 0.5 : 0), -1, 1));
-  const catchHatPop =
-    g.state === 'LANDING' && (g.landingT || 0) > 0.52
-      ? -Math.round(Math.sin(clamp(((g.landingT || 0) - 0.52) / 0.30, 0, 1) * Math.PI) * 1.1)
-      : g.state === 'CAUGHT'
-        ? -Math.round(Math.exp(-(g.catchTime || 0) * 4.5) * Math.abs(Math.sin((g.catchTime || 0) * 12)) * 1.0)
-        : 0;
+  // Curved woven coastal straw sun-hat (stable, crisp, zero twitchy 1px bounce jitter!)
+  const hatTilt = Math.round(clamp((g.animLean || 0) * 0.22, -1, 1));
   const hatX = hx + hatTilt;
-  const hatY = hy - 3 + catchHatPop;
+  const hatY = hy - 3;
 
   // Gently curved upturned straw brim (curved ends instead of flat brick!)
   px(ctx, hatX - 6, hatY, '#c98e30', 1, 1);      // upturned left brim tip
@@ -563,8 +552,8 @@ export function renderArticulatedAngler(g, ctx) {
     }
   };
 
-  // When tucked behind the shoulder during catch trophy display, render the rod BEHIND the torso so it never slices across the fish!
-  const rodBehindBody = (rig.tuck || 0) > 0.55;
+  // Draw rod BEHIND head & torso as soon as tuck begins or rod swings past vertical so it NEVER slices through face/hat!
+  const rodBehindBody = (rig.tuck || 0) > 0.08 || (g.rodAngle || -0.7) < -1.32;
   if (rodBehindBody) drawRodAndReel();
 
   // 5. Sculpted fisherman torso (open teal vest + cream henley + brass-buckled belt)
@@ -601,30 +590,19 @@ export function renderArticulatedAngler(g, ctx) {
     px(ctx, rig.reelX + 1, rig.reelY + 1, '#facc15', 1, 1);
   }
 
-  // 9. Celebrated caught fish held proudly with lifelike wiggle-flop tilt & realistic hand-wrap!
+  // 9. Celebrated caught fish held cleanly OUT IN FRONT of the outstretched hand (100% crisp un-rotated pixels, 0.00px continuity!)
   if (g.state === 'CAUGHT' && g.lastCatchInfo) {
     const spId = g.lastCatchInfo.species.id;
     const frames = g.sprites.fish[spId].right;
     const ct = g.catchTime || 0;
-    // Fast lively flop wiggle right after catching, easing into gentle breathing tail swish
-    const flopSpeed = ct < 1.2 ? 11.5 : 6.5;
+    const flopSpeed = ct < 1.0 ? 11.0 : 6.5;
     const fSpr = frames[Math.floor(g.time * flopSpeed) % frames.length];
-    const flopTilt = -0.06
-      + Math.sin(ct * 8.4) * 0.13 * Math.exp(-ct * 0.55)
-      + Math.sin(ct * 3.1) * 0.04;
+    const fx = Math.round(rig.catchHoldX - fSpr.width / 2);
+    const fy = Math.round(rig.catchHoldY - fSpr.height / 2);
+    ctx.drawImage(fSpr, fx, fy);
 
-    ctx.save();
-    ctx.translate(Math.round(rig.catchHoldX), Math.round(rig.catchHoldY));
-    ctx.rotate(flopTilt);
-    ctx.drawImage(fSpr, Math.round(-fSpr.width / 2), Math.round(-fSpr.height / 2));
-    ctx.restore();
-
-    // Foreground gripping fingers wrapping subtly over the bottom edge of the fish so the human truly holds it!
-    px(ctx, rig.gripX, rig.gripY, '#ffe0c4', 2, 1);
-    px(ctx, rig.gripX, rig.gripY + 1, '#c2815d', 2, 1);
-    if (rig.twoHandCatch) {
-      px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
-      px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1);
-    }
+    // Clean foreground gripping fingers (front hand) wrapping neatly over the fish's tail-stem
+    px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
+    px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1);
   }
 }

@@ -1240,42 +1240,31 @@ function renderAnglerBioluminescence(ctx, dx, dy, sprW, dir, frame, time, phase,
   ctx.restore();
 }
 
-// Foreground pass for the lifted fish during LANDING so it leaps nose-first out of the waves
-// and lands smoothly inside the angler's gripping hands (0.00px continuity into CAUGHT!)
+// Foreground pass for the lifted fish during LANDING: 100% crisp pixel-aligned sprite (zero jagged rotation!),
+// gliding cleanly out of the water straight into the angler's outstretched hand with 0.00px continuity into CAUGHT!
 function renderLandingFishForeground(g, ctx) {
   if (g.state !== 'LANDING' || !g.activeFish) return;
   const f = g.activeFish;
   const sprSet = g.sprites.fish[f.species.id];
   if (!sprSet) return;
-  const animHz = (g.landingT || 0) < 0.55 ? 14 : 11.5;
+  const animHz = (g.landingT || 0) < 0.62 ? 14 : 11.0;
   const frame = Math.floor(g.time * animHz) % sprSet.right.length;
-  const img = f.dir >= 0 ? sprSet.right[frame] : sprSet.left[frame];
-  const ang = g.landingFishAngle || 0;
+  const img = sprSet.right[frame];
+  const dx = Math.round(f.x - sprSet.w / 2);
+  const dy = Math.round(f.y - sprSet.h / 2);
 
-  ctx.save();
-  ctx.translate(Math.round(f.x), Math.round(f.y));
-  ctx.rotate(ang);
-  const dx = Math.round(-sprSet.w / 2);
-  const dy = Math.round(-sprSet.h / 2);
   ctx.drawImage(img, dx, dy);
   if (f.species.id === 'angler') {
-    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, f.dir, frame, g.time, f.phase, 0.5, 0.4);
+    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, 1, frame, g.time, f.phase, 0.5, 0.4);
   }
-  ctx.restore();
 
-  // Once the angler grabs the fish (t >= 0.55), draw foreground gripping fingers over the fish belly edge
-  if ((g.landingT || 0) >= 0.55) {
+  // Once the angler catches the fish (t >= 0.62), draw crisp foreground gripping fingers over the grip point
+  if ((g.landingT || 0) >= 0.62) {
     const rig = computeAnglerRig(g);
     ctx.fillStyle = '#ffe0c4';
-    ctx.fillRect(Math.round(rig.gripX), Math.round(rig.gripY), 2, 1);
+    ctx.fillRect(Math.round(rig.reelX), Math.round(rig.reelY), 2, 1);
     ctx.fillStyle = '#c2815d';
-    ctx.fillRect(Math.round(rig.gripX), Math.round(rig.gripY + 1), 2, 1);
-    if (rig.twoHandCatch) {
-      ctx.fillStyle = '#ffe0c4';
-      ctx.fillRect(Math.round(rig.reelX), Math.round(rig.reelY), 2, 1);
-      ctx.fillStyle = '#c2815d';
-      ctx.fillRect(Math.round(rig.reelX), Math.round(rig.reelY + 1), 2, 1);
-    }
+    ctx.fillRect(Math.round(rig.reelX), Math.round(rig.reelY + 1), 2, 1);
   }
 }
 
@@ -1453,17 +1442,14 @@ function renderLineAndHook(g, ctx) {
 
   if (g.state === 'LANDING') {
     const t = clamp(g.landingT || 0, 0, 1);
-    if (t < 0.36) {
-      // Taut straight line pulling fish up out of water during the rod heave!
+    if (t < 0.44) {
       drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#e2e8f0');
-    } else if (t < 0.68) {
-      // Gracefully slackening curved catenary line fading out as the angler grabs the catch
-      const p = (t - 0.36) / 0.32;
-      const slackSag = 2 + p * 9;
+    } else if (t < 0.66) {
+      const p = (t - 0.44) / 0.22;
       const mx = (rod.tipX + g.hookX) * 0.5;
-      const my = (rod.tipY + g.hookY) * 0.5 + slackSag;
+      const my = (rod.tipY + g.hookY) * 0.5 + 3 + p * 7;
       ctx.save();
-      ctx.globalAlpha = clamp(1 - p * 0.9, 0.1, 1);
+      ctx.globalAlpha = clamp(1 - p, 0.08, 1);
       drawPixelQuad(ctx, rod.tipX, rod.tipY, mx, my, g.hookX, g.hookY, '#cbd5e1', 12);
       ctx.restore();
     }
