@@ -137,24 +137,88 @@ export function computeAnglerRig(g) {
   const cosA = Math.cos(rodAngle);
   const sinA = Math.sin(rodAngle);
 
+  const wf = g.landingWeightFactor ?? 0.35;
+  const twoHandCatch = wf >= 0.40;
   let gripX, gripY, reelX, reelY;
+  let catchHoldX = shoulderX + 8.5;
+  let catchHoldY = shoulderY + 0.5;
+  let tuck = 0;
+
   if (g.state === 'CAUGHT' || g.state === 'LANDING') {
-    // Stage 1 (landingT 0..0.55): hand reaches cleanly forward to meet incoming fish
-    // Stage 2 (landingT 0.55..1.0): raises the caught fish smoothly overhead -> exact match for CAUGHT!
-    const meetX = shoulderX + 8.5;
-    const meetY = shoulderY + 0.5;
-    const celX = shoulderX + 9.5;
-    const celY = headY - 5.5;
-    const raise = g.state === 'CAUGHT'
+    const t = g.state === 'CAUGHT' ? 1 : clamp(g.landingT || 0, 0, 1);
+
+    // Beat 1 (0..0.34): two-handed heavy rod heave starting seamlessly from exact REELING hand offsets (0.00px jump!)
+    const initGDX = Number.isFinite(g.landingInitGripDX) ? g.landingInitGripDX : 5.6;
+    const initGDY = Number.isFinite(g.landingInitGripDY) ? g.landingInitGripDY : 1.2;
+    const initRDX = Number.isFinite(g.landingInitReelDX) ? g.landingInitReelDX : (initGDX - cosA * 3.4);
+    const initRDY = Number.isFinite(g.landingInitReelDY) ? g.landingInitReelDY : (initGDY - sinA * 3.4 + 0.4);
+    const heaveP = smoothstep(clamp(t / 0.34, 0, 1));
+    const heaveTargetGX = shoulderX + 4.1;
+    const heaveTargetGY = shoulderY - 1.9 - wf * 0.6;
+    const heaveGripX = lerp(shoulderX + initGDX, heaveTargetGX, heaveP);
+    const heaveGripY = lerp(shoulderY + initGDY, heaveTargetGY, heaveP);
+    const heaveReelX = lerp(shoulderX + initRDX, heaveTargetGX - cosA * 3.1, heaveP);
+    const heaveReelY = lerp(shoulderY + initRDY, heaveTargetGY - sinA * 3.1 + 0.3, heaveP);
+
+    // Beat 2 (0.34..0.55): natural forward intercept right in front of the chest (keeps face 100% clear!)
+    const catchImpact = g.state === 'LANDING'
+      ? Math.exp(-Math.pow((t - 0.56) / 0.08, 2)) * (0.8 + wf * 1.3)
+      : 0;
+    const meetX = twoHandCatch ? shoulderX + 6.4 : shoulderX + 7.4;
+    const meetY = shoulderY + 2.4 + wf * 1.1 + catchImpact;
+
+    // Beat 3 (0.55..1.0) & CAUGHT: REALISTIC FISHERMAN TROPHY POSE!
+    // - Small/medium fish: proudly held out at arm's length in front of chest (smiling face & hat 100% unobstructed!)
+    // - Heavy beasts: cradled proudly across front chest/waist in BOTH HANDS with slight back counterbalance lean!
+    const ct = g.state === 'CAUGHT' ? (g.catchTime || 0) : 0;
+    const bob = g.state === 'CAUGHT' ? Math.sin(ct * 4.6) * (0.55 + wf * 0.25) : 0;
+    const celX = twoHandCatch ? shoulderX + 6.8 : shoulderX + 8.0;
+    const celY = (twoHandCatch ? shoulderY + 2.2 : shoulderY - 0.3) + bob;
+
+    const raiseP = g.state === 'CAUGHT'
       ? 1
-      : g.landingT <= 0.55
+      : t <= 0.55
         ? 0
-        : smoothstep(clamp((g.landingT - 0.55) / 0.45, 0, 1));
-    gripX = lerp(meetX, celX, raise);
-    gripY = lerp(meetY, celY, raise);
-    // Back hand holds the tucked rod cleanly behind shoulder
-    reelX = shoulderX - 4.2;
-    reelY = hipY - 2.2;
+        : smoothstep(clamp((t - 0.55) / 0.45, 0, 1));
+
+    catchHoldX = lerp(meetX, celX, raiseP);
+    catchHoldY = lerp(meetY, celY, raiseP);
+
+    if (t < 0.34) {
+      gripX = heaveGripX;
+      gripY = heaveGripY;
+      reelX = heaveReelX;
+      reelY = heaveReelY;
+      tuck = 0;
+    } else if (t < 0.55) {
+      // Smoothly swing front hand to intercept fish while back hand tucks the rod neatly behind shoulder!
+      const swP = smoothstep((t - 0.34) / 0.21);
+      tuck = swP;
+      const targetGripX = twoHandCatch ? catchHoldX + 2.0 : catchHoldX;
+      const targetGripY = twoHandCatch ? catchHoldY + 1.4 : catchHoldY + 0.6;
+      gripX = lerp(heaveGripX, targetGripX, swP);
+      gripY = lerp(heaveGripY, targetGripY, swP);
+      const tuckedX = shoulderX - 3.2;
+      const tuckedY = hipY - 2.8;
+      reelX = lerp(heaveReelX, tuckedX, swP);
+      reelY = lerp(heaveReelY, tuckedY, swP);
+    } else {
+      tuck = 1;
+      if (twoHandCatch) {
+        // Heavy fish: BOTH hands naturally cradle the trophy across the front of the torso (inside comfortable IK reach!)
+        const cradleP = smoothstep(clamp((t - 0.55) / 0.24, 0, 1));
+        gripX = catchHoldX + 2.0;
+        gripY = catchHoldY + 1.4;
+        reelX = lerp(shoulderX - 3.2, catchHoldX - 2.4, cradleP);
+        reelY = lerp(hipY - 2.8, catchHoldY + 1.8, cradleP);
+      } else {
+        // Light/medium fish: proud one-hand trophy display out front; back hand rests cleanly on the tucked rod butt!
+        gripX = catchHoldX;
+        gripY = catchHoldY + 0.6;
+        reelX = shoulderX - 3.2;
+        reelY = hipY - 2.8;
+      }
+    }
   } else if (g.state === 'IDLE') {
     // Relaxed, natural two-hand ready grip cleanly spaced along the cork rod handle
     gripX = shoulderX + 6.4;
@@ -208,13 +272,8 @@ export function computeAnglerRig(g) {
 
   // Rod butt/tip anchored to gripping hand; smoothly tucks behind left shoulder during LANDING -> CAUGHT
   const rodLen = 28 + ((g.save && g.save.upgrades && g.save.upgrades.rod ? g.save.upgrades.rod : 1) - 1) * 2.2;
-  const tuck = g.state === 'CAUGHT'
-    ? 1
-    : g.state === 'LANDING'
-      ? smoothstep(clamp((g.landingT - 0.42) / 0.45, 0, 1))
-      : 0;
   const rodHandX = lerp(gripX, shoulderX - 4.4, tuck);
-  const rodHandY = lerp(gripY, shoulderY + 1.2, tuck);
+  const rodHandY = lerp(gripY, shoulderY + 1.0, tuck);
   const tipBaseX = rodHandX + cosA * rodLen;
   const tipBaseY = rodHandY + sinA * rodLen;
   const bend = (g.rodFlex || 0) * 14.5;
@@ -237,6 +296,10 @@ export function computeAnglerRig(g) {
     gripY,
     reelX,
     reelY,
+    catchHoldX,
+    catchHoldY,
+    twoHandCatch,
+    tuck,
     rodHandX,
     rodHandY,
     ctrlX,
@@ -361,34 +424,43 @@ function drawSculptedHeadAndHat(ctx, g, rig) {
 
   // Expressive eye + subtle mood (blinking, water-gaze, strain-squint, happy catch smile!)
   const blinking = (g.time % 4.3) > 4.16;
-  const straining = g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72);
-  const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && g.landingT > 0.55);
+  const straining =
+    (g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72)) ||
+    (g.state === 'LANDING' && (g.landingT || 0) < 0.34);
+  const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && (g.landingT || 0) > 0.52);
 
   if (blinking || happy) {
-    // Happy curved squint-eye or gentle blink
-    px(ctx, hx + 1, hy - 1, '#4a2616', 2, 1);
+    // Happy curved squint-eye (lifts 1px looking up at trophy!) or gentle blink
+    px(ctx, hx + 1, hy - (happy ? 2 : 1), '#4a2616', 2, 1);
     if (happy) {
-      // Warm celebratory smile pixel!
+      // Warm celebratory grin & rosy cheek!
       px(ctx, hx + 1, hy + 1, '#b55b48', 2, 1);
+      px(ctx, hx + 2, hy, '#f7c8a4', 1, 1);
       px(ctx, hx, hy, '#eb9482', 1, 1); // rosy happy cheek
     }
   } else if (straining) {
-    // Focused determined furrowed brow!
+    // Focused determined furrowed brow during heavy heave/fight!
     px(ctx, hx + 1, hy - 1, '#3b1e11', 2, 1);
     px(ctx, hx + 2, hy, '#1b1d2b', 1, 1);
     px(ctx, hx + 1, hy + 1, '#a85745', 1, 1);
   } else {
-    // Bright readable eye tracking toward water/bobber
+    // Bright readable eye tracking toward water/bobber or incoming fish!
     const lookDown = (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING');
     px(ctx, hx + 1, hy - 1, '#fffaf5', 1, 1);
-    px(ctx, hx + 2, hy - 1 + (lookDown ? 0 : 0), '#1f2336', 1, 1);
+    px(ctx, hx + 2, hy - 1, '#1f2336', 1, 1);
     if (lookDown) px(ctx, hx + 1, hy, '#e89b84', 1, 1); // soft cheek blush
   }
 
-  // Curved woven coastal straw sun-hat (domed crown + upturned brim + fluttering red ribbon!)
-  const hatTilt = Math.round(clamp((g.animLean || 0) * 0.22, -1, 1));
+  // Curved woven coastal straw sun-hat (domed crown + upturned brim + dynamic catch bounce & fluttering red ribbon!)
+  const hatTilt = Math.round(clamp((g.animLean || 0) * 0.22 - (happy ? 0.5 : 0), -1, 1));
+  const catchHatPop =
+    g.state === 'LANDING' && (g.landingT || 0) > 0.52
+      ? -Math.round(Math.sin(clamp(((g.landingT || 0) - 0.52) / 0.30, 0, 1) * Math.PI) * 1.1)
+      : g.state === 'CAUGHT'
+        ? -Math.round(Math.exp(-(g.catchTime || 0) * 4.5) * Math.abs(Math.sin((g.catchTime || 0) * 12)) * 1.0)
+        : 0;
   const hatX = hx + hatTilt;
-  const hatY = hy - 3;
+  const hatY = hy - 3 + catchHatPop;
 
   // Gently curved upturned straw brim (curved ends instead of flat brick!)
   px(ctx, hatX - 6, hatY, '#c98e30', 1, 1);      // upturned left brim tip
@@ -465,36 +537,45 @@ export function renderArticulatedAngler(g, ctx) {
   drawOrganicLimb(ctx, frontKnee.x, frontKnee.y, rig.frontFootX, gy - 2.2, '#6490cc', '#446ca3', '#203861', 1.9, 1.5);
   drawCoastalBoot(ctx, rig.frontFootX, gy, false);
 
+  // Helper to render the fishing rod + reel cleanly (placed behind torso when tucked during catch trophy hold!)
+  const drawRodAndReel = () => {
+    const rodColors = ['#d49c59', '#60a5fa', '#e2e8f0', '#2dd4bf', '#facc15'];
+    const rodColor = rodColors[((g.save && g.save.upgrades ? g.save.upgrades.rod : 1) - 1) % rodColors.length];
+
+    const buttX = rig.rodHandX - rig.cosA * 5.2;
+    const buttY = rig.rodHandY - rig.sinA * 5.2;
+    drawPixelLineLocal(ctx, buttX, buttY + 1, rig.rodHandX, rig.rodHandY + 1, '#4a2b14');
+    drawPixelLineLocal(ctx, buttX, buttY, rig.rodHandX, rig.rodHandY, '#c98c50');
+
+    drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY, rig.ctrlX, rig.ctrlY, rig.tipX, rig.tipY, '#1c2638', 16);
+    drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY - 1, rig.ctrlX, rig.ctrlY - 1, rig.tipX, rig.tipY - 1, rodColor, 16);
+    px(ctx, rig.tipX, rig.tipY - 1, '#ffffff', 1, 1);
+
+    const seatX = rig.rodHandX - rig.cosA * 2.2;
+    const seatY = rig.rodHandY - rig.sinA * 2.2 + 1.4;
+    px(ctx, seatX - 1, seatY, '#475569', 3, 2);
+    px(ctx, seatX, seatY, '#cbd5e1', 2, 1);
+    px(ctx, seatX, seatY, '#ffffff', 1, 1);
+
+    const onReel = g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING';
+    if (onReel) {
+      drawPixelLineLocal(ctx, seatX, seatY + 1, rig.reelX, rig.reelY, '#e2e8f0');
+    }
+  };
+
+  // When tucked behind the shoulder during catch trophy display, render the rod BEHIND the torso so it never slices across the fish!
+  const rodBehindBody = (rig.tuck || 0) > 0.55;
+  if (rodBehindBody) drawRodAndReel();
+
   // 5. Sculpted fisherman torso (open teal vest + cream henley + brass-buckled belt)
   drawSculptedTorso(ctx, rig);
 
   // 6. Sculpted head, layered hair, expressive face & curved woven straw hat
   drawSculptedHeadAndHat(ctx, g, rig);
 
-  // 7. Fishing Rod (cork grip -> flexible tapered blank -> glowing tip guide -> spinning reel)
-  const rodColors = ['#d49c59', '#60a5fa', '#e2e8f0', '#2dd4bf', '#facc15'];
-  const rodColor = rodColors[((g.save && g.save.upgrades ? g.save.upgrades.rod : 1) - 1) % rodColors.length];
-
-  const buttX = rig.rodHandX - rig.cosA * 5.2;
-  const buttY = rig.rodHandY - rig.sinA * 5.2;
-  drawPixelLineLocal(ctx, buttX, buttY + 1, rig.rodHandX, rig.rodHandY + 1, '#4a2b14');
-  drawPixelLineLocal(ctx, buttX, buttY, rig.rodHandX, rig.rodHandY, '#c98c50');
-
-  drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY, rig.ctrlX, rig.ctrlY, rig.tipX, rig.tipY, '#1c2638', 16);
-  drawPixelQuadLocal(ctx, rig.rodHandX, rig.rodHandY - 1, rig.ctrlX, rig.ctrlY - 1, rig.tipX, rig.tipY - 1, rodColor, 16);
-  px(ctx, rig.tipX, rig.tipY - 1, '#ffffff', 1, 1);
-
-  // Sleek silver spinning reel & rotating crank arm (only connect crank arm when line is out!)
-  const seatX = rig.rodHandX - rig.cosA * 2.2;
-  const seatY = rig.rodHandY - rig.sinA * 2.2 + 1.4;
-  px(ctx, seatX - 1, seatY, '#475569', 3, 2);
-  px(ctx, seatX, seatY, '#cbd5e1', 2, 1);
-  px(ctx, seatX, seatY, '#ffffff', 1, 1);
-
+  // 7. Fishing Rod (in front during active fishing; already tucked neatly behind back during trophy hold!)
+  if (!rodBehindBody) drawRodAndReel();
   const onReel = g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING';
-  if (onReel) {
-    drawPixelLineLocal(ctx, seatX, seatY + 1, rig.reelX, rig.reelY, '#e2e8f0');
-  }
 
   // Sculpted left hand gripping rod foregrip / holding fish (clean compact 2x2 hand!)
   px(ctx, rig.gripX, rig.gripY, '#ffe0c4', 1, 1);
@@ -520,15 +601,30 @@ export function renderArticulatedAngler(g, ctx) {
     px(ctx, rig.reelX + 1, rig.reelY + 1, '#facc15', 1, 1);
   }
 
-  // 9. Celebrated caught fish held proudly right in the raised hand (0.00px continuity from LANDING!)
+  // 9. Celebrated caught fish held proudly with lifelike wiggle-flop tilt & realistic hand-wrap!
   if (g.state === 'CAUGHT' && g.lastCatchInfo) {
-    const fSpr = g.sprites.fish[g.lastCatchInfo.species.id].right[Math.floor(g.time * 8) % 4];
-    // Starts at exact 0.00px offset when catchTime === 0 so LANDING -> CAUGHT has ZERO jump!
-    const bob = Math.sin((g.catchTime || 0) * 5.2) * 0.9;
-    ctx.drawImage(
-      fSpr,
-      Math.round(rig.gripX - fSpr.width / 2),
-      Math.round(rig.gripY - fSpr.height / 2 + bob)
-    );
+    const spId = g.lastCatchInfo.species.id;
+    const frames = g.sprites.fish[spId].right;
+    const ct = g.catchTime || 0;
+    // Fast lively flop wiggle right after catching, easing into gentle breathing tail swish
+    const flopSpeed = ct < 1.2 ? 11.5 : 6.5;
+    const fSpr = frames[Math.floor(g.time * flopSpeed) % frames.length];
+    const flopTilt = -0.06
+      + Math.sin(ct * 8.4) * 0.13 * Math.exp(-ct * 0.55)
+      + Math.sin(ct * 3.1) * 0.04;
+
+    ctx.save();
+    ctx.translate(Math.round(rig.catchHoldX), Math.round(rig.catchHoldY));
+    ctx.rotate(flopTilt);
+    ctx.drawImage(fSpr, Math.round(-fSpr.width / 2), Math.round(-fSpr.height / 2));
+    ctx.restore();
+
+    // Foreground gripping fingers wrapping subtly over the bottom edge of the fish so the human truly holds it!
+    px(ctx, rig.gripX, rig.gripY, '#ffe0c4', 2, 1);
+    px(ctx, rig.gripX, rig.gripY + 1, '#c2815d', 2, 1);
+    if (rig.twoHandCatch) {
+      px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
+      px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1);
+    }
   }
 }

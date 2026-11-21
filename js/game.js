@@ -1339,6 +1339,13 @@ class PierlineGame {
   }
 
   startLanding() {
+    // Capture exact current hand offsets relative to shoulder BEFORE switching state -> 0.00px arm jump!
+    const preRig = computeAnglerRig(this);
+    this.landingInitGripDX = preRig.gripX - preRig.shoulderX;
+    this.landingInitGripDY = preRig.gripY - preRig.shoulderY;
+    this.landingInitReelDX = preRig.reelX - preRig.shoulderX;
+    this.landingInitReelDY = preRig.reelY - preRig.shoulderY;
+
     this.state = 'LANDING';
     this.reelHold = false;
     this.devAutoLand = false;
@@ -1346,13 +1353,20 @@ class PierlineGame {
     this.landingStartX = this.activeFish.x;
     this.landingStartY = this.activeFish.y;
     this.landingStartDir = this.activeFish.dir;
+    this.landingBreachDone = false;
+    this.landingGrabDone = false;
+    this.landingFishAngle = -0.35;
+    // Physical weight factor (0.08 tiny minnow -> 1.0 colossal Leviathan/Kraken) drives body heave, knee dip & 2-hand hold!
+    const sp = this.activeFish.species;
+    const avgW = ((sp.minWeight || 0.2) + (sp.maxWeight || 1.0)) * 0.5;
+    this.landingWeightFactor = clamp(Math.log10(1 + avgW) / 2.15, 0.08, 1.0);
     for (const f of this.fishes) {
       if (f.ai === 'AMBUSH') {
         f.ai = 'CRUISE';
         f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8);
       }
     }
-    this.spawnSplash(this.activeFish.x, this.waterY, 12);
+    this.spawnSplash(this.activeFish.x, this.waterY, Math.round(10 + this.landingWeightFactor * 10));
     this.spawnRipple(this.activeFish.x, this.waterY);
     sound.playLandingLift();
     this.updateControlsUI();
@@ -1860,8 +1874,13 @@ class PierlineGame {
     if (this.state === 'WAITING' && this.retrieving) return -0.84;
     if (this.state === 'BITE') return -0.34 + Math.sin(this.time * 24) * 0.06;
     if (this.state === 'REELING') return (this.reelHold || this.devAutoLand) ? -1.04 : -0.60;
-    if (this.state === 'LANDING') return lerp(-1.04, -1.92, smoothstep(clamp(this.landingT, 0, 1)));
-    if (this.state === 'CAUGHT') return -1.92;
+    if (this.state === 'LANDING') {
+      const t = clamp(this.landingT || 0, 0, 1);
+      // Beat 1 (0..0.34): heave rod high & back; Beat 2-3 (0.34..1): smoothly rest rod across back shoulder
+      if (t < 0.34) return lerp(-1.04, -1.58, smoothstep(t / 0.34));
+      return lerp(-1.58, -2.06, smoothstep((t - 0.34) / 0.66));
+    }
+    if (this.state === 'CAUGHT') return -2.06;
     return -0.62;
   }
 
@@ -1946,10 +1965,37 @@ class PierlineGame {
           this.crankAngle += (this.inSweetSpot ? 17.5 : 12.5) * dt;
         }
       }
-    } else if (this.state === 'LANDING' || this.state === 'CAUGHT') {
-      targetLean = 0.5;
-      targetSquat = 0;
-      targetStance = 0.3;
+    } else if (this.state === 'LANDING') {
+      // Multi-beat physical catch kinematics weighted by fish mass!
+      const t = clamp(this.landingT || 0, 0, 1);
+      const wf = this.landingWeightFactor ?? 0.35;
+      if (t < 0.34) {
+        // Beat 1 — Heavy Rod Heave: lean back, plant wide, load knees to pull fish out of water
+        const p = smoothstep(t / 0.34);
+        targetLean = lerp(-1.6, -2.8 - wf * 1.9, p);
+        targetSquat = lerp(1.2, 1.8 + wf * 1.1, p);
+        targetStance = 1.0;
+      } else if (t < 0.62) {
+        // Beat 2 — Reach Forward & Catch Cushion: shift forward, intercept fish with physical weight-dip!
+        const p = smoothstep((t - 0.34) / 0.28);
+        const catchImpact = Math.exp(-Math.pow((t - 0.56) / 0.085, 2)); // crisp physical dip on hand grab
+        targetLean = lerp(-2.6 - wf * 1.4, 1.55 - wf * 0.35, p);
+        targetSquat = 0.55 + catchImpact * (0.85 + wf * 1.45);
+        targetStance = lerp(0.95, 0.62, p);
+      } else {
+        // Beat 3 — Proud Trophy Hoist: straighten up heroically (subtle back counterbalance for heavy beasts!)
+        const p = smoothstep((t - 0.62) / 0.38);
+        targetLean = lerp(1.3, -0.25 - wf * 0.85, p);
+        targetSquat = lerp(0.8 + wf * 0.5, wf * 0.35, p);
+        targetStance = lerp(0.62, 0.45 + wf * 0.25, p);
+      }
+    } else if (this.state === 'CAUGHT') {
+      const wf = this.landingWeightFactor ?? 0.35;
+      // Gentle living triumph settle & proud posture (heavier fish = wider grounded stance & slight counterbalance lean)
+      const joyBounce = Math.exp(-(this.catchTime || 0) * 3.4) * Math.sin((this.catchTime || 0) * 11.5) * 0.45;
+      targetLean = -0.25 - wf * 0.85;
+      targetSquat = Math.max(0, wf * 0.35 + joyBounce);
+      targetStance = 0.45 + wf * 0.25;
     }
     const kinEase = 1 - Math.exp(-10 * dt);
     this.animLean = lerp(this.animLean, targetLean, kinEase);
@@ -2172,47 +2218,102 @@ class PierlineGame {
     } else if (this.state === 'REELING') {
       this.updateReeling(dt);
     } else if (this.state === 'LANDING') {
-      this.landingT += dt * 1.05; // smooth ~0.95s physical heave & hand-catch (never snaps!)
+      const wf = this.landingWeightFactor ?? 0.35;
+      // Slightly heavier, more dramatic heave duration for big beasts (~1.05s small -> ~1.28s colossal)
+      this.landingT += dt * lerp(0.96, 0.78, wf);
       const t = clamp(this.landingT, 0, 1);
       const rig = computeAnglerRig(this);
       let fx, fy;
       if (t < 0.55) {
-        // Stage 1: Smooth arc straight out of water into the angler's waiting hand!
+        // Stage 1: Real ballistic heave out of water into the angler's waiting hands!
         const p = smoothstep(t / 0.55);
-        const liftArc = Math.sin(p * Math.PI) * 14;
-        fx = lerp(this.landingStartX, rig.gripX, p);
-        fy = lerp(this.landingStartY, rig.gripY, p) - liftArc;
+        const arcPeak = 13 + wf * 8;
+        const liftArc = Math.sin(p * Math.PI) * arcPeak;
+        const prevX = this.activeFish ? this.activeFish.x : this.landingStartX;
+        const prevY = this.activeFish ? this.activeFish.y : this.landingStartY;
+        fx = lerp(this.landingStartX, rig.catchHoldX, p);
+        fy = lerp(this.landingStartY, rig.catchHoldY, p) - liftArc;
+
+        // Secondary water-breach crown splash right as fish clears the water surface!
+        if (!this.landingBreachDone && fy < this.waterY - 2) {
+          this.landingBreachDone = true;
+          this.spawnSplash(fx, this.waterY, Math.round(7 + wf * 8));
+        }
+
+        // Velocity-aligned pitch angle so the fish leaps nose-first out of the waves instead of flying flat!
+        const vx = (fx - prevX) / Math.max(0.001, dt);
+        const vy = (fy - prevY) / Math.max(0.001, dt);
+        const rawAng = Math.atan2(vy, Math.max(24, Math.abs(vx))) * (this.landingStartDir >= 0 ? 1 : -1);
+        const targetAng = clamp(rawAng * 0.55, -0.58, 0.45);
+        this.landingFishAngle = lerp(this.landingFishAngle || 0, targetAng, 1 - Math.exp(-14 * dt));
       } else {
-        // Stage 2: Fish is gripped directly in the angler's hand as they lift it proudly overhead (0.00px jump into CAUGHT!)
-        fx = rig.gripX;
-        fy = rig.gripY;
+        // Stage 2: Physically intercepted & hoisted overhead with live flop-tilt settling smoothly into CAUGHT!
+        const hp = smoothstep((t - 0.55) / 0.45);
+        if (!this.landingGrabDone) {
+          this.landingGrabDone = true;
+          // Crisp wet water-shake burst right on hand catch impact!
+          for (let i = 0; i < Math.round(6 + wf * 7); i++) {
+            this.particles.push({
+              x: rig.catchHoldX + rand(-4, 4),
+              y: rig.catchHoldY + rand(-2, 3),
+              vx: rand(-26, 26),
+              vy: rand(-28, -4),
+              g: 120,
+              life: rand(0.22, 0.45),
+              size: 1,
+              color: i % 2 === 0 ? '#e0f2fe' : '#7dd3fc',
+            });
+          }
+        }
+        fx = rig.catchHoldX;
+        fy = rig.catchHoldY;
+        const flop = Math.sin(t * 28) * 0.14 * (1 - hp * 0.6);
+        this.landingFishAngle = lerp(this.landingFishAngle || 0, -0.06 + flop, 1 - Math.exp(-12 * dt));
       }
       if (this.activeFish) {
         this.activeFish.x = fx;
         this.activeFish.y = fy;
-        this.activeFish.dir = t > 0.52 ? 1 : this.landingStartDir;
+        this.activeFish.dir = t > 0.48 ? 1 : this.landingStartDir;
       }
       this.hookX = fx;
       this.hookY = fy;
-      this.rodFlex = lerp(this.rodFlex, 0.24 * (1 - t), 1 - Math.exp(-9 * dt));
+      // Heavy rod bend during initial water heave (0..0.34), smoothly releasing as fish clears water & angler grabs it
+      const targetFlex = t < 0.34
+        ? (0.40 + wf * 0.42) * Math.sin((t / 0.34) * Math.PI * 0.72)
+        : 0.16 * (1 - clamp((t - 0.34) / 0.4, 0, 1));
+      this.rodFlex = lerp(this.rodFlex, targetFlex, 1 - Math.exp(-11 * dt));
 
-      // Trailing water droplets off the lifted fish
-      if (t < 0.65 && Math.random() < dt * 22) {
+      // Trailing glistening water droplets off the lifted fish
+      if (t < 0.78 && Math.random() < dt * (20 + wf * 14)) {
         this.particles.push({
-          x: fx + rand(-3, 3),
-          y: fy + rand(0, 3),
-          vx: rand(-10, 10),
-          vy: rand(4, 18),
-          g: 110,
-          life: rand(0.2, 0.38),
+          x: fx + rand(-4, 4),
+          y: fy + rand(0, 4),
+          vx: rand(-12, 12),
+          vy: rand(4, 20),
+          g: 115,
+          life: rand(0.22, 0.42),
           size: 1,
-          color: '#bae6fd',
+          color: Math.random() < 0.5 ? '#e0f2fe' : '#bae6fd',
         });
       }
       if (t >= 1) this.completeCatch();
     } else if (this.state === 'CAUGHT') {
       this.catchTime += dt;
       this.rodFlex = lerp(this.rodFlex, 0, 1 - Math.exp(-6 * dt));
+      // Occasional wet water droplets dripping off the freshly caught fish!
+      if (this.catchTime < 3.5 && Math.random() < dt * 7) {
+        const rig = computeAnglerRig(this);
+        this.particles.push({
+          x: rig.catchHoldX + rand(-5, 5),
+          y: rig.catchHoldY + rand(2, 5),
+          vx: rand(-4, 4),
+          vy: rand(2, 8),
+          g: 110,
+          life: rand(0.28, 0.52),
+          size: 1,
+          color: '#bae6fd',
+        });
+      }
     } else {
       this.rodFlex = lerp(this.rodFlex, 0, 1 - Math.exp(-6 * dt));
     }
