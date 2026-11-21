@@ -309,23 +309,48 @@ class SoundEngine {
       if (!res.ok) return;
       const manifest = await res.json();
       if (!manifest || !manifest.files) return;
+
+      // Priority-load core gameplay & UI sounds first so take #1 is ready within ~150ms
+      const priority = new Set([
+        'ui_click_wood', 'ui_click_bamboo', 'ui_click_frost', 'ui_click_basalt', 'ui_click_marble',
+        'ui_hover', 'ui_open', 'ui_close', 'cast', 'splash_small', 'splash_big',
+        'nibble', 'bite', 'bite_big', 'hook_set', 'reel_tick', 'line_stop', 'fish_thrash', 'coins',
+      ]);
       const entries = Object.entries(manifest.files);
-      await Promise.all(entries.map(async ([key, rel]) => {
+      const queue = [];
+      // First pass: take 0 of priority keys; second pass: take 0 of remaining keys; third pass: extra takes
+      for (const [key, rel] of entries) {
         const list = Array.isArray(rel) ? rel : [rel];
-        const bufs = [];
-        for (const relPath of list) {
+        if (priority.has(key) && list.length) queue.push([key, list[0]]);
+      }
+      for (const [key, rel] of entries) {
+        const list = Array.isArray(rel) ? rel : [rel];
+        if (!priority.has(key) && list.length) queue.push([key, list[0]]);
+      }
+      for (const [key, rel] of entries) {
+        const list = Array.isArray(rel) ? rel : [rel];
+        for (let i = 1; i < list.length; i++) queue.push([key, list[i]]);
+      }
+
+      // Bounded concurrency (6 parallel fetches) keeps HTTP/2 snappy without flooding decode threads
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < queue.length) {
+          const [key, relPath] = queue[cursor++];
           try {
             const r = await fetch(`assets/sfx/${relPath}`);
             if (!r.ok) continue;
             const arr = await r.arrayBuffer();
+            if (!this.ctx) continue;
             const decoded = await this.ctx.decodeAudioData(arr);
-            bufs.push(decoded);
+            if (!this.samples.has(key)) this.samples.set(key, [decoded]);
+            else this.samples.get(key).push(decoded);
           } catch (_) {}
         }
-        if (bufs.length) this.samples.set(key, bufs);
-      }));
+      };
+      await Promise.all(Array.from({ length: 6 }, () => worker()));
     } catch (_) {
-      // Physical-modeling Foley synth handles all audio seamlessly
+      // Physical-modeling Foley synth handles any fallback seamlessly
     }
   }
 
@@ -572,13 +597,14 @@ class SoundEngine {
   }
 
   playAuroraShimmer(pan = 0) {
+    if (this._playSample('amb_aurora', 0.28, 0.05, 1.0, 0.35, pan)) return;
     const notes = [880, 1108.7, 1318.5, 1760];
     const f = notes[this._pickVariant('aurora', notes.length)];
     this._acousticNote(f, 0.85, 0.014, 0, 'bell', pan);
   }
 
   playLavaPop(pan = 0) {
-    if (this._playSample('amb_lava', 0.42, 0.09, 1.0, 0.4, pan)) return;
+    if (this._playSample('amb_lava', 0.38, 0.07, 1.0, 0.25, pan)) return;
     // Deep magma bubble bloop + brief steam vent hiss
     this._bubble(155 + Math.random() * 90, 0.095, 0.045, 0, pan);
     this._filteredNoise({
@@ -588,7 +614,7 @@ class SoundEngine {
   }
 
   playCrystalHum(pan = 0) {
-    if (this._playSample('amb_crystal', 0.35, 0.05, 1.0, 0.6, pan)) return;
+    if (this._playSample('amb_crystal', 0.32, 0.05, 1.0, 0.4, pan)) return;
     const scale = [523.3, 659.3, 784.0, 987.8, 1318.5];
     const f = scale[this._pickVariant('cryst', scale.length)];
     this._acousticNote(f, 0.9, 0.016, 0, 'bell', pan);
@@ -598,6 +624,7 @@ class SoundEngine {
     const now = performance.now();
     if (now - this.lastBubblePop < 950) return;
     this.lastBubblePop = now;
+    if (this._playSample('water_bubble', 0.26, 0.08, 1.0, 0.16, pan)) return;
     this._bubble(520 + Math.random() * 480, 0.036, 0.018, 0, pan);
   }
 
@@ -646,44 +673,48 @@ class SoundEngine {
     const now = performance.now();
     if (now - this.lastHoverTick < 70) return;
     this.lastHoverTick = now;
+    if (this._playSample('ui_hover', 0.22, 0.06, 1.0, 0.04)) return;
     this._materialTap(780, 0.024);
   }
 
   playUiClick() {
-    if (this._playSample('ui_click', 0.65, 0.07)) return;
+    const dockKey = `ui_click_${this.env.dockStyle || 'wood'}`;
+    if (this._playSample(dockKey, 0.56, 0.05, 1.0, 0.08)) return;
+    if (this._playSample('ui_click_wood', 0.56, 0.05, 1.0, 0.08)) return;
     const pitches = [620, 685, 580, 720];
     this._materialTap(pitches[this._pickVariant('uiclick', 4)], 0.082);
   }
 
   playUiTab() {
-    if (this._playSample('ui_tab', 0.65, 0.06)) return;
+    const dockKey = `ui_click_${this.env.dockStyle || 'wood'}`;
+    if (this._playSample(dockKey, 0.50, 0.04, 1.12, 0.08)) return;
     const v = this._pickVariant('uitab', 3);
     this._materialTap(540 + v * 55, 0.072, 0);
     this._metalClick(3050 + v * 280, 0.030, 0.018, 0.012);
   }
 
   playUiOpen() {
-    if (this._playSample('ui_open', 0.72, 0.04)) return;
+    if (this._playSample('ui_open', 0.58, 0.04, 1.0, 0.08)) return;
     this._materialTap(460, 0.078, 0);
     this._acousticNote(523.3, 0.16, 0.048, 0.02, 'marimba');
     this._acousticNote(659.3, 0.20, 0.048, 0.06, 'marimba');
   }
 
   playUiClose() {
-    if (this._playSample('ui_close', 0.68, 0.04)) return;
+    if (this._playSample('ui_close', 0.56, 0.04, 1.0, 0.08)) return;
     this._materialTap(420, 0.072, 0);
     this._acousticNote(493.9, 0.13, 0.040, 0.015, 'marimba');
     this._acousticNote(392.0, 0.16, 0.036, 0.055, 'marimba');
   }
 
   playUiError() {
-    if (this._playSample('ui_error', 0.72)) return;
+    if (this._playSample('ui_denied', 0.64, 0.04, 1.0, 0.08)) return;
     this._materialTap(210, 0.105, 0, 'wood');
     this._materialTap(165, 0.105, 0.09, 'wood');
   }
 
   playToggle(on = true) {
-    if (this._playSample(on ? 'toggle_on' : 'toggle_off', 0.7)) return;
+    if (this._playSample('admin_action', 0.56, 0.04, on ? 1.08 : 0.90, 0.06)) return;
     if (on) {
       this._metalClick(2450, 0.055, 0, 0.014);
       this._materialTap(740, 0.068, 0.018);
@@ -697,12 +728,13 @@ class SoundEngine {
     const now = performance.now();
     if (now - this.lastSliderTick < 52) return;
     this.lastSliderTick = now;
+    if (this._playSample('ui_hover', 0.28, 0.03, 0.85 + frac * 0.35, 0.04)) return;
     this._materialTap(420 + frac * 440, 0.042);
   }
 
   // ── Multi-Variant Casting, Lure & Water Foley ─────────────────────────────
   playCastStart() {
-    if (this._playSample('cast_start', 0.7, 0.06, 1.0, 0.15, -0.5)) return;
+    if (this._playSample('line_stop', 0.52, 0.05, 1.06, 0.10, -0.5)) return;
     const v = this._pickVariant('caststart', 3);
     this._metalClick(3250 + v * 280, 0.074, 0, 0.016, -0.52);
     this._materialTap(310 + v * 28, 0.062, 0.012, null, -0.52);
@@ -712,6 +744,7 @@ class SoundEngine {
     const now = performance.now();
     if (now - this.lastChargeTick < 105) return;
     this.lastChargeTick = now;
+    if (this._playSample('reel_tick', 0.22 + power * 0.12, 0.04, 0.80 + power * 0.32, 0.06, -0.5)) return;
     const v = this._pickVariant('charge', 3);
     this._filteredNoise({
       dur: 0.045, vol: 0.042 + power * 0.032, pink: true,
@@ -785,7 +818,7 @@ class SoundEngine {
   }
 
   playRetrieveStart() {
-    if (this._playSample('retrieve_start', 0.7, 0.05, 1.0, 0.12, -0.45)) return;
+    if (this._playSample('line_stop', 0.48, 0.05, 0.94, 0.10, -0.45)) return;
     this._metalClick(2900, 0.074, 0, 0.016, -0.45);
     this._metalClick(1920, 0.050, 0.016, 0.012, -0.45);
   }
@@ -891,7 +924,7 @@ class SoundEngine {
   }
 
   playSweetSpotEnter() {
-    if (this._playSample('sweet_enter', 0.55)) return;
+    if (this._playSample('sweet_spot', 0.40, 0.04, 1.0, 0.06, -0.35)) return;
     // Crisp gentle confirmation pulse when tension locks smoothly inside the Sweet Spot
     this._acousticNote(784.0, 0.15, 0.036, 0, 'harp', 0);
     this._acousticNote(1046.5, 0.18, 0.032, 0.04, 'bell', 0);
@@ -1006,7 +1039,7 @@ class SoundEngine {
   }
 
   playEscape(pan = 0.2) {
-    if (this._playSample('fish_escape', 0.85, 0.05, 1.0, 0.26, pan)) return;
+    if (this._playSample('escape', 0.78, 0.05, 1.0, 0.20, pan)) return;
     this.playSplash(false, pan);
     this._osc(180, 82, 0.18, 'sine', 0.11, 0.04, 0.28, 0.008, pan);
     this._bubble(440, 0.05, 0.05, 0.08, pan);
@@ -1014,7 +1047,7 @@ class SoundEngine {
   }
 
   playLandingLift(pan = -0.25) {
-    if (this._playSample('landing_lift', 0.9, 0.05, 1.0, 0.26, pan)) return;
+    if (this._playSample('landing_lift', 0.84, 0.05, 1.0, 0.20, pan)) return;
     this.playSplash(true, pan);
     this._filteredNoise({
       dur: 0.24, vol: 0.18, delay: 0.04, pink: true,
@@ -1027,7 +1060,7 @@ class SoundEngine {
 
   // ── Predator Ambush & World Events ────────────────────────────────────────
   playAmbushAlert(pan = 0.25) {
-    if (this._playSample('ambush_alert', 0.9, 0.05, 1.0, 0.32, pan)) return;
+    if (this._playSample('ambush_alert', 0.82, 0.05, 1.0, 0.24, pan)) return;
     this._osc(78, 52, 0.26, 'sine', 0.19, 0, 0.34, 0.018, pan);
     this._osc(116.5, 98, 0.22, 'triangle', 0.11, 0.02, 0.30, 0.015, pan);
     this._filteredNoise({
@@ -1039,7 +1072,7 @@ class SoundEngine {
   }
 
   playChomp(chain = 1, pan = 0.25) {
-    if (this._playSample('predator_chomp', 0.95, 0.05, 1.0, 0.28, pan)) return;
+    if (this._playSample('predator_chomp', 0.90, 0.04, Math.max(0.76, 1.02 - (chain - 1) * 0.07), 0.20, pan)) return;
     const pitchBoost = 1 + Math.min(2, Math.max(0, chain - 1)) * 0.12;
     this._osc(96, 34, 0.24, 'sine', 0.26, 0, 0.30, 0.003, pan);
     this._filteredNoise({
@@ -1056,7 +1089,7 @@ class SoundEngine {
   }
 
   playMythSpawn(pan = 0.3) {
-    if (this._playSample('myth_spawn', 0.95, 0.03, 1.0, 0.48, pan)) return;
+    if (this._playSample('myth_spawn', 0.86, 0.03, 1.0, 0.35, pan)) return;
     this._osc(65.4, 58.3, 0.95, 'sine', 0.18, 0, 0.55, 0.08, pan);
     this._osc(130.8, 123.5, 0.78, 'triangle', 0.09, 0.05, 0.50, 0.07, pan);
     this._filteredNoise({
@@ -1072,7 +1105,7 @@ class SoundEngine {
     const now = performance.now();
     if (now - this.lastStarChime < 3200) return;
     this.lastStarChime = now;
-    if (this._playSample('shooting_star', 0.42, 0.06, 1.0, 0.48, pan)) return;
+    if (this._playSample('shooting_star', 0.36, 0.05, 1.0, 0.35, pan)) return;
     const v = this._pickVariant('star', 3);
     const notes = [[1568, 2093], [1760, 2349], [1318.5, 1975.5]][v];
     this._acousticNote(notes[0], 0.34, 0.022, 0, 'bell', pan);
@@ -1082,8 +1115,10 @@ class SoundEngine {
   // ── Acoustic Musical Fanfares, Coins, Maps & Time ─────────────────────────
   playCatch(rarity = 'common') {
     const key = (rarity === 'myth' || rarity === 'mythic') ? 'catch_myth'
-      : rarity === 'legendary' ? 'catch_legendary' : 'catch';
-    if (this._playSample(key, 0.88)) return;
+      : rarity === 'legendary' ? 'catch_legendary'
+      : (rarity === 'rare' || rarity === 'epic') ? 'catch_rare'
+      : 'catch_common';
+    if (this._playSample(key, 0.78, 0.02, 1.0, 0.18)) return;
 
     if (rarity === 'myth' || rarity === 'mythic') {
       const notes = [392.0, 523.3, 659.3, 784.0, 987.8, 1318.5, 1568.0];
@@ -1112,7 +1147,7 @@ class SoundEngine {
   }
 
   playNewSpecies() {
-    if (this._playSample('new_species', 0.8)) return;
+    if (this._playSample('new_discovery', 0.72, 0.03, 1.0, 0.16)) return;
     this._materialTap(360, 0.09, 0.34, 'wood');
     [880.0, 1174.7, 1396.9, 1760.0].forEach((f, i) => {
       this._acousticNote(f, 0.32, 0.048, 0.38 + i * 0.068, 'bell');
@@ -1120,14 +1155,14 @@ class SoundEngine {
   }
 
   playNewRecord() {
-    if (this._playSample('new_record', 0.8)) return;
+    if (this._playSample('new_discovery', 0.76, 0.03, 1.12, 0.18)) return;
     this._materialTap(420, 0.08, 0.34, 'wood');
     this._acousticNote(987.8, 0.24, 0.055, 0.38, 'bell');
     this._acousticNote(1318.5, 0.36, 0.06, 0.46, 'bell');
   }
 
   playCoinJingle(big = false) {
-    if (this._playSample(big ? 'coins_big' : 'coins', 0.8, 0.05)) return;
+    if (this._playSample('coins', big ? 0.78 : 0.62, 0.05, big ? 0.94 : 1.04, 0.12)) return;
     const v = this._pickVariant('coin', 3);
     const shift = [0.96, 1.0, 1.06][v];
     this._coinClink(2420 * shift, 0.07, 0);
@@ -1140,14 +1175,14 @@ class SoundEngine {
   }
 
   playBuy() {
-    if (this._playSample('shop_buy', 0.82, 0.05)) return;
+    if (this._playSample('upgrade_buy', 0.76, 0.04, 1.0, 0.14)) return;
     this._coinClink(2480, 0.075, 0);
     this._coinClink(3120, 0.07, 0.068);
     this._materialTap(580, 0.07, 0.02);
   }
 
   playMaxUpgrade() {
-    if (this._playSample('max_upgrade', 0.88)) return;
+    if (this._playSample('map_unlock', 0.80, 0.03, 1.08, 0.20)) return;
     this._coinClink(2640, 0.07, 0);
     [523.3, 659.3, 784.0, 1046.5, 1318.5].forEach((f, i) => {
       this._acousticNote(f, i === 4 ? 0.55 : 0.22, 0.072, 0.04 + i * 0.06, 'bell');
@@ -1155,14 +1190,14 @@ class SoundEngine {
   }
 
   playMapUnlock() {
-    if (this._playSample('map_unlock', 0.9)) return;
+    if (this._playSample('map_unlock', 0.82, 0.03, 1.0, 0.22)) return;
     [392.0, 493.9, 587.3, 784.0, 987.8].forEach((f, i) => {
       this._acousticNote(f, i === 4 ? 0.68 : 0.28, 0.082, i * 0.075, 'harp');
     });
   }
 
   playMapTravel(mapId = 'harbor') {
-    if (this._playSample(`travel_${mapId}`, 0.85)) return;
+    if (this._playSample('map_travel', 0.76, 0.05, 1.0, 0.22)) return;
     this._filteredNoise({
       dur: 0.48, vol: 0.12, pink: true,
       filterType: 'lowpass', freqStart: 780, freqEnd: 260, q: 0.9, attack: 0.08, wet: 0.36,
@@ -1183,7 +1218,7 @@ class SoundEngine {
   }
 
   playTimeShift(phase = 'DAY') {
-    if (this._playSample('time_shift', 0.72)) return;
+    if (this._playSample('amb_aurora', 0.38, 0.04, phase === 'NIGHT' ? 0.88 : 1.08, 0.28)) return;
     if (phase === 'NIGHT') {
       this._acousticNote(659.3, 0.32, 0.05, 0, 'bell');
       this._acousticNote(392.0, 0.42, 0.05, 0.08, 'bell');
@@ -1200,13 +1235,13 @@ class SoundEngine {
   }
 
   playReset() {
-    if (this._playSample('reset', 0.8)) return;
+    if (this._playSample('ui_close', 0.66, 0.04, 0.85, 0.12)) return;
     this._materialTap(420, 0.10, 0, 'wood');
     this._osc(310, 110, 0.28, 'triangle', 0.09, 0.04, 0.26, 0.01);
   }
 
   playMiss() {
-    if (this._playSample('miss', 0.75)) return;
+    if (this._playSample('retrieve_finish', 0.52, 0.05, 0.92, 0.14)) return;
     this._materialTap(280, 0.09, 0, 'wood');
     this._osc(240, 140, 0.16, 'sine', 0.075, 0.02, 0.22, 0.008);
   }

@@ -1,0 +1,274 @@
+{
+  "generator": "bianbianzhu/procedural-sfx + fishing_recipes.py",
+  "sampleRate": 24000,
+  "format": "wav-pcm16",
+  "files": {
+    "splash_small": [
+      "splash_small_1.wav",
+      "splash_small_2.wav",
+      "splash_small_3.wav",
+      "splash_small_4.wav"
+    ],
+    "splash_big": [
+      "splash_big_1.wav",
+      "splash_big_2.wav",
+      "splash_big_3.wav",
+      "splash_big_4.wav"
+    ],
+    "nibble": [
+      "nibble_1.wav",
+      "nibble_2.wav",
+      "nibble_3.wav",
+      "nibble_4.wav"
+    ],
+    "water_bubble": [
+      "water_bubble_1.wav",
+      "water_bubble_2.wav",
+      "water_bubble_3.wav",
+      "water_bubble_4.wav"
+    ],
+    "seabed_tap": [
+      "seabed_tap_1.wav",
+      "seabed_tap_2.wav",
+      "seabed_tap_3.wav"
+    ],
+    "fish_curious": [
+      "fish_curious_1.wav",
+      "fish_curious_2.wav",
+      "fish_curious_3.wav"
+    ],
+    "cast": [
+      "cast_1.wav",
+      "cast_2.wav",
+      "cast_3.wav",
+      "cast_4.wav"
+    ],
+    "reel_tick": [
+      "reel_tick_1.wav",
+      "reel_tick_2.wav",
+      "reel_tick_3.wav",
+      "reel_tick_4.wav"
+    ],
+    "drag_out": [
+      "drag_out_1.wav",
+      "drag_out_2.wav",
+      "drag_out_3.wav"
+    ],
+    "hook_set": [
+      "hook_set_1.wav",
+      "hook_set_2.wav",
+      "hook_set_3.wav"
+    ],
+    "line_stop": [
+      "line_stop_1.wav",
+      "line_stop_2.wav",
+      "line_stop_3.wav"
+    ],
+    "jig": [
+      "jig_1.wav",
+      "jig_2.wav",
+      "jig_3.wav"
+    ],
+    "retrieve_finish": [
+      "retrieve_finish_1.wav",
+      "retrieve_finish_2.wav",
+      "retrieve_finish_3.wav"
+    ],
+    "tension_warn": [
+      "tension_warn_1.wav",
+      "tension_warn_2.wav",
+      "tension_warn_3.wav"
+    ],
+    "line_snap": [
+      "line_snap_1.wav",
+      "line_snap_2.wav",
+      "line_snap_3.wav"
+    ],
+    "escape": [
+      "escape_1.wav",
+      "escape_2.wav",
+      "escape_3.wav"
+    ],
+    "bite": [
+      "bite_1.wav",
+      "bite_2.wav",
+      "bite_3.wav"
+    ],
+    "bite_big": [
+      "bite_big_1.wav",
+      "bite_big_2.wav",
+      "bite_big_3.wav"
+    ],
+    "fish_warning": [
+      "fish_warning_1.wav",
+      "fish_warning_2.wav",
+      "fish_warning_3.wav"
+    ],
+    "fish_thrash": [
+      "fish_thrash_1.wav",
+      "fish_thrash_2.wav",
+      "fish_thrash_3.wav",
+      "fish_thrash_4.wav"
+    ],
+    "fish_calm": [
+      "fish_calm_1.wav",
+      "fish_calm_2.wav",
+      "fish_calm_3.wav"
+    ],
+    "landing_lift": [
+      "landing_lift_1.wav",
+      "landing_lift_2.wav",
+      "landing_lift_3.wav"
+    ],
+    "ambush_alert": [
+      "ambush_alert_1.wav",
+      "ambush_alert_2.wav",
+      "ambush_alert_3.wav"
+    ],
+    "predator_chomp": [
+      "predator_chomp_1.wav",
+      "predator_chomp_2.wav",
+      "predator_chomp_3.wav"
+    ],
+    "catch_common": [
+      "catch_common_1.wav",
+      "catch_common_2.wav"
+    ],
+    "catch_rare": [
+      "catch_rare_1.wav",
+      "catch_rare_2.wav"
+    ],
+    "catch_legendary": [
+      "catch_legendary_1.wav",
+      "catch_legendary_2.wav"
+    ],
+    "catch_myth": [
+      "catch_myth_1.wav",
+      "catch_myth_2.wav"
+    ],
+    "sweet_spot": [
+      "sweet_spot_1.wav",
+      "sweet_spot_2.wav",
+      "sweet_spot_3.wav"
+    ],
+    "ui_click_wood": [
+      "ui_click_wood_1.wav",
+      "ui_click_wood_2.wav",
+      "ui_click_wood_3.wav",
+      "ui_click_wood_4.wav"
+    ],
+    "ui_click_bamboo": [
+      "ui_click_bamboo_1.wav",
+      "ui_click_bamboo_2.wav",
+      "ui_click_bamboo_3.wav",
+      "ui_click_bamboo_4.wav"
+    ],
+    "ui_click_frost": [
+      "ui_click_frost_1.wav",
+      "ui_click_frost_2.wav",
+      "ui_click_frost_3.wav",
+      "ui_click_frost_4.wav"
+    ],
+    "ui_click_basalt": [
+      "ui_click_basalt_1.wav",
+      "ui_click_basalt_2.wav",
+      "ui_click_basalt_3.wav",
+      "ui_click_basalt_4.wav"
+    ],
+    "ui_click_marble": [
+      "ui_click_marble_1.wav",
+      "ui_click_marble_2.wav",
+      "ui_click_marble_3.wav",
+      "ui_click_marble_4.wav"
+    ],
+    "ui_hover": [
+      "ui_hover_1.wav",
+      "ui_hover_2.wav",
+      "ui_hover_3.wav"
+    ],
+    "ui_open": [
+      "ui_open_1.wav",
+      "ui_open_2.wav"
+    ],
+    "ui_close": [
+      "ui_close_1.wav",
+      "ui_close_2.wav"
+    ],
+    "ui_denied": [
+      "ui_denied_1.wav",
+      "ui_denied_2.wav"
+    ],
+    "coins": [
+      "coins_1.wav",
+      "coins_2.wav",
+      "coins_3.wav",
+      "coins_4.wav"
+    ],
+    "upgrade_buy": [
+      "upgrade_buy_1.wav",
+      "upgrade_buy_2.wav"
+    ],
+    "map_travel": [
+      "map_travel_1.wav",
+      "map_travel_2.wav"
+    ],
+    "map_unlock": [
+      "map_unlock_1.wav",
+      "map_unlock_2.wav"
+    ],
+    "new_discovery": [
+      "new_discovery_1.wav",
+      "new_discovery_2.wav"
+    ],
+    "myth_spawn": [
+      "myth_spawn_1.wav",
+      "myth_spawn_2.wav"
+    ],
+    "shooting_star": [
+      "shooting_star_1.wav",
+      "shooting_star_2.wav"
+    ],
+    "admin_action": [
+      "admin_action_1.wav",
+      "admin_action_2.wav"
+    ],
+    "pier_creak": [
+      "pier_creak_1.wav",
+      "pier_creak_2.wav",
+      "pier_creak_3.wav"
+    ],
+    "amb_seagull": [
+      "amb_seagull_1.wav",
+      "amb_seagull_2.wav",
+      "amb_seagull_3.wav"
+    ],
+    "amb_tropical": [
+      "amb_tropical_1.wav",
+      "amb_tropical_2.wav",
+      "amb_tropical_3.wav"
+    ],
+    "amb_cricket": [
+      "amb_cricket_1.wav",
+      "amb_cricket_2.wav",
+      "amb_cricket_3.wav"
+    ],
+    "amb_ice": [
+      "amb_ice_1.wav",
+      "amb_ice_2.wav",
+      "amb_ice_3.wav"
+    ],
+    "amb_aurora": [
+      "amb_aurora_1.wav",
+      "amb_aurora_2.wav"
+    ],
+    "amb_lava": [
+      "amb_lava_1.wav",
+      "amb_lava_2.wav",
+      "amb_lava_3.wav"
+    ],
+    "amb_crystal": [
+      "amb_crystal_1.wav",
+      "amb_crystal_2.wav"
+    ]
+  }
+}
