@@ -278,7 +278,7 @@ class PierlineGame {
     const u = this.save.upgrades;
     return {
       maxCastFrac: 0.56 + (u.rod - 1) * 0.10,
-      maxDepthFrac: 0.48 + (u.line - 1) * 0.125,
+      maxDepthFrac: 0.72 + (u.line - 1) * 0.08,
       reelSpeed: 0.28 + (u.rod - 1) * 0.06,
       tensionDecay: 0.46 + (u.line - 1) * 0.06,
       lineStrength: 1 + (u.line - 1) * 0.28,
@@ -840,9 +840,10 @@ class PierlineGame {
     const maxCastX = this.pierEndX + (this.vw - this.pierEndX - 18) * stats.maxCastFrac;
     this.castTargetX = clamp(lerp(minCastX, maxCastX, this.chargePower), minCastX, this.vw - 14);
 
-    const waterH = Math.max(36, this.vh - 20 - this.waterY);
-    const depthFrac = clamp(0.14 + this.chargePower * stats.maxDepthFrac, 0.14, 0.92);
-    this.targetDepthY = this.waterY + 10 + depthFrac * (waterH - 12);
+    const bedY = this.getSeabedY(this.castTargetX) - 6;
+    const availH = Math.max(36, bedY - (this.waterY + 8));
+    const depthFrac = clamp(0.16 + Math.pow(this.chargePower, 0.80) * stats.maxDepthFrac, 0.16, 0.98);
+    this.targetDepthY = clamp(this.waterY + 8 + depthFrac * availH, this.waterY + 10, bedY);
 
     const rod = this.getRodTipPos();
     this.castStartX = rod.tipX;
@@ -1444,7 +1445,7 @@ class PierlineGame {
       } else {
         this.bobberY = this.waterY + Math.sin(this.time * 4.2) * 1.1 + this.bobDipImpulse;
         this.hookX = lerp(this.hookX, this.bobberX + Math.sin(this.time * 2.1) * 1.5, 1 - Math.exp(-4 * dt));
-        this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-1.9 * dt));
+        this.hookY = lerp(this.hookY, Math.min(this.targetDepthY, this.getSeabedY(this.hookX) - 6), 1 - Math.exp(-3.6 * dt));
         this.rodFlex = lerp(this.rodFlex, 0.04, 1 - Math.exp(-6 * dt));
       }
     } else if (this.state === 'BITE') {
@@ -1725,7 +1726,7 @@ class PierlineGame {
         f.x += f.dir * f.speed * 2.3 * dt;
         if (f.fleeTimer <= 0) f.ai = 'CRUISE';
       } else if (f.ai === 'CURIOUS') {
-        if (this.state !== 'WAITING') { f.ai = 'CRUISE'; continue; }
+        if (this.state !== 'WAITING') { f.ai = 'CRUISE'; f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8); continue; }
         // Keep fish cleanly on one side of the lure while inspecting (NEVER crosses dx=0 -> zero flicker!)
         const side = f.inspectSide || (f.x <= this.hookX ? -1 : 1);
         f.inspectSide = side;
@@ -1751,7 +1752,7 @@ class PierlineGame {
           f.nibbleTimer = 0.24;
         }
       } else if (f.ai === 'NIBBLE') {
-        if (this.state !== 'WAITING') { f.ai = 'CRUISE'; continue; }
+        if (this.state !== 'WAITING') { f.ai = 'CRUISE'; f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8); continue; }
         const side = f.inspectSide || -1;
         f.dir = -side;
         const spr = this.sprites.fish[f.species.id];
@@ -1786,7 +1787,7 @@ class PierlineGame {
           }
         }
       } else if (f.ai === 'APPROACH') {
-        if (this.state !== 'WAITING') { f.ai = 'CRUISE'; continue; }
+        if (this.state !== 'WAITING') { f.ai = 'CRUISE'; f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8); continue; }
         const mouth = this.getFishMouthPos(f);
         const dx = this.hookX - mouth.x;
         const dy = this.hookY - mouth.y;
@@ -1810,7 +1811,8 @@ class PierlineGame {
       } else {
         f.turnTimer -= dt;
         f.x += f.dir * f.speed * dt;
-        f.y = f.homeY + Math.sin(this.time * 2.2 + f.phase) * 2.4;
+        const cruiseTargetY = clamp(f.homeY + Math.sin(this.time * 2.2 + f.phase) * 2.4, this.waterY + 8, this.getSeabedY(f.x) - 8);
+        f.y = lerp(f.y, cruiseTargetY, 1 - Math.exp(-2.8 * dt));
 
         const minX = this.pierEndX + 10;
         const maxX = this.vw - 10;
