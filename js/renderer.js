@@ -501,23 +501,68 @@ function renderHorizon(g, ctx, map, pal) {
   const lhY = wy - 5 - lh.height;
   ctx.drawImage(lh, isleX, lhY);
 
-  const beaconPulse = 0.5 + 0.5 * Math.sin(g.time * 3.2);
   if (pal.night > 0.2) {
+    const cx = isleX + 7;
+    const cy = lhY + 2;
+    const rot = g.time * 0.95; // Smooth 360-degree rotating dual Fresnel lens
+    const flash = Math.pow(Math.max(0, Math.abs(Math.cos(rot))), 4); // Realistic lens flash as beam sweeps past viewer
+
     ctx.save();
-    drawPixelHalo(ctx, isleX + 7, lhY + 3, 5, '#fef08a', pal.night * (0.26 + 0.20 * beaconPulse));
-    drawPixelHalo(ctx, isleX + 7, lhY + 3, 2, '#fef9c3', pal.night * 0.72);
-    // Continuous sweeping lighthouse searchlight beam across the moonlit bay!
-    const sweepDir = Math.cos(g.time * 1.15);
-    const beamLen = Math.round(52 * (0.45 + 0.55 * Math.abs(sweepDir)));
-    const dir = sweepDir >= 0 ? -1 : 1;
-    ctx.globalAlpha = pal.night * (0.14 + 0.12 * Math.abs(sweepDir));
-    ctx.fillStyle = '#fef08a';
-    ctx.beginPath();
-    ctx.moveTo(isleX + 7, lhY + 3);
-    ctx.lineTo(isleX + 7 + dir * beamLen, lhY - 8);
-    ctx.lineTo(isleX + 7 + dir * beamLen, lhY + 13);
-    ctx.closePath();
-    ctx.fill();
+    // Dual opposing Fresnel beams (180° apart) with smooth volumetric distance falloff (no hard cutoff!)
+    for (let b = 0; b < 2; b++) {
+      const ang = rot + b * Math.PI;
+      const side = Math.sin(ang); // -1 = full left, 0 = straight toward/away, +1 = full right
+      const facing = Math.cos(ang); // >0 = front half (brighter), <0 = back half (softer)
+      const sideMag = Math.abs(side);
+      if (sideMag < 0.08) continue;
+
+      const dir = side >= 0 ? 1 : -1;
+      const maxLen = Math.round((g.isPortrait ? 46 : 74) * sideMag);
+      const depthDim = facing >= 0 ? 1.0 : 0.42;
+
+      for (let d = 2; d <= maxLen; d++) {
+        const x = cx + dir * d;
+        if (x < 0 || x >= g.vw) break;
+        const frac = d / Math.max(1, maxLen);
+        // Smooth inverse-cubic atmospheric fade to 0 at tip (zero hard edge!)
+        const falloff = Math.pow(1 - frac, 1.85) * sideMag * depthDim * pal.night;
+        if (falloff < 0.008) continue;
+
+        // Beam dips gently toward the distant bay horizon
+        const beamY = cy + d * 0.045;
+        const outerHalf = 1.0 + d * 0.115;
+        const coreHalf = 0.55 + d * 0.045;
+
+        const oy0 = Math.round(beamY - outerHalf);
+        const oy1 = Math.min(wy - 1, Math.round(beamY + outerHalf));
+        if (oy1 >= oy0) {
+          ctx.fillStyle = '#fde68a';
+          ctx.globalAlpha = falloff * 0.14;
+          ctx.fillRect(x, oy0, 1, oy1 - oy0 + 1);
+        }
+
+        const iy0 = Math.round(beamY - coreHalf);
+        const iy1 = Math.min(wy - 1, Math.round(beamY + coreHalf));
+        if (iy1 >= iy0) {
+          ctx.fillStyle = '#fef9c3';
+          ctx.globalAlpha = falloff * 0.24;
+          ctx.fillRect(x, iy0, 1, iy1 - iy0 + 1);
+        }
+      }
+    }
+
+    // Soft circular warm Fresnel lamp glow + crisp lens flash glint when facing viewer
+    drawPixelHalo(ctx, cx, cy, 7, '#facc15', pal.night * (0.10 + 0.14 * flash));
+    drawPixelHalo(ctx, cx, cy, 4, '#fef08a', pal.night * (0.24 + 0.28 * flash));
+    drawPixelHalo(ctx, cx, cy, 2, '#fef9c3', pal.night * (0.62 + 0.34 * flash));
+    if (flash > 0.32) {
+      const flare = (flash - 0.32) / 0.68;
+      const arm = Math.round(2 + flare * 3);
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = pal.night * flare * 0.85;
+      ctx.fillRect(cx - arm, cy, arm * 2 + 1, 1);
+      ctx.fillRect(cx, cy - Math.max(1, arm - 1), 1, Math.max(1, arm - 1) * 2 + 1);
+    }
     ctx.restore();
   }
 }
@@ -1188,12 +1233,13 @@ function renderWaterSurface(g, ctx, map, pal, cel) {
 
     // 2) Horizon landmark reflections
     if (map.id === 'harbor') {
-      const isleX = g.vw - (g.isPortrait ? 38 : 64) + 6;
-      const pulse = 0.5 + 0.5 * Math.sin(g.time * 3.2);
+      const isleX = g.vw - (g.isPortrait ? 38 : 64) + 7;
+      const flash = Math.pow(Math.max(0, Math.abs(Math.cos(g.time * 0.95))), 4);
       ctx.fillStyle = '#fef08a';
-      for (let r = 0; r < 3; r++) {
-        ctx.globalAlpha = pal.night * (0.28 + 0.22 * pulse) * (1 - r * 0.28);
-        ctx.fillRect(isleX - 4 + Math.round(Math.sin(g.time * 3 + r) * 2), wy + 1 + r * 2, 8 - r * 2, 1);
+      for (let r = 0; r < 4; r++) {
+        ctx.globalAlpha = pal.night * (0.22 + 0.34 * flash) * (1 - r * 0.22);
+        const w = Math.round((6 + flash * 4) - r * 1.6);
+        if (w > 0) ctx.fillRect(isleX - Math.floor(w / 2) + Math.round(Math.sin(g.time * 3 + r) * 1.5), wy + 1 + r * 2, w, 1);
       }
     } else if (map.id === 'fjord') {
       // Emerald-aqua & violet aurora borealis reflections rippling across dark fjord waves!
