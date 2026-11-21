@@ -354,7 +354,7 @@ class SoundEngine {
     }
   }
 
-  _playSample(key, vol = 0.85, rateJitter = 0.05, rateBase = 1.0, wet = 0.18, pan = 0) {
+  _playSample(key, vol = 0.85, rateJitter = 0.05, rateBase = 1.0, wet = 0.18, pan = 0, waterDepth = 0) {
     if (this.muted || !this.ctx || !this.samples.has(key)) return false;
     try {
       const list = this.samples.get(key);
@@ -362,9 +362,20 @@ class SoundEngine {
       const src = this.ctx.createBufferSource();
       src.buffer = list[idx];
       src.playbackRate.value = Math.max(0.5, rateBase + (Math.random() * 2 - 1) * rateJitter);
+      let head = src;
+      // Real-life underwater acoustic absorption: deeper sound = steeper lowpass muffling
+      if (waterDepth > 0.02) {
+        const d = Math.max(0, Math.min(1, waterDepth));
+        const lpf = this.ctx.createBiquadFilter();
+        lpf.type = 'lowpass';
+        lpf.frequency.value = Math.round(2800 * Math.pow(0.20, d)); // ~2800 Hz near surface -> ~560 Hz at seabed
+        lpf.Q.value = 0.85;
+        head.connect(lpf);
+        head = lpf;
+      }
       const g = this.ctx.createGain();
       g.gain.value = vol;
-      src.connect(g);
+      head.connect(g);
       this._connectOut(g, 1.0, wet, pan);
       src.start();
       return true;
@@ -647,11 +658,11 @@ class SoundEngine {
     }
   }
 
-  playSeabedTap(pan = 0) {
+  playSeabedTap(pan = 0, depth = 0.9) {
     const now = performance.now();
     if (now - this.lastSeabedTap < 1400) return;
     this.lastSeabedTap = now;
-    if (this._playSample('seabed_tap', 0.5, 0.07, 1.0, 0.3, pan)) return;
+    if (this._playSample('seabed_tap', 0.56, 0.07, 1.0, 0.25, pan, depth)) return;
     const m = this.env.mapId;
     if (m === 'fjord') {
       this._materialTap(680, 0.042, 0, 'frost', pan);
@@ -848,11 +859,11 @@ class SoundEngine {
   }
 
   // ── Multi-Variant Fish AI, Bite & Reeling Foley ───────────────────────────
-  playFishCurious(pan = 0.2) {
+  playFishCurious(pan = 0.2, depth = 0.45) {
     const now = performance.now();
     if (now - this.lastCuriousBlip < 750) return;
     this.lastCuriousBlip = now;
-    if (this._playSample('fish_curious', 0.55, 0.08, 1.0, 0.28, pan)) return;
+    if (this._playSample('fish_curious', 0.55, 0.08, 1.0, 0.24, pan, depth)) return;
     const v = this._pickVariant('curious', 3);
     this._filteredNoise({
       dur: 0.10, vol: 0.055, pink: true,
@@ -930,8 +941,8 @@ class SoundEngine {
     this._acousticNote(1046.5, 0.18, 0.032, 0.04, 'bell', 0);
   }
 
-  playFishWarning(pan = 0.2) {
-    if (this._playSample('fish_warning', 0.8, 0.05, 1.0, 0.22, pan)) return;
+  playFishWarning(pan = 0.2, depth = 0.4) {
+    if (this._playSample('fish_warning', 0.8, 0.05, 1.0, 0.20, pan, depth)) return;
     const v = this._pickVariant('warn', 3);
     this._filteredNoise({
       dur: 0.16, vol: 0.12, pink: true,
@@ -941,8 +952,8 @@ class SoundEngine {
     this._metalClick(3850 + v * 190, 0.085, 0.075, 0.016, -0.4);
   }
 
-  playFishThrash(pan = 0.2, strength = 1.0) {
-    if (this._playSample('fish_thrash', 0.9, 0.07, 1.0, 0.3, pan)) return;
+  playFishThrash(pan = 0.2, strength = 1.0, depth = 0.15) {
+    if (this._playSample('fish_thrash', 0.88, 0.07, 1.0, 0.26, pan, depth)) return;
     const v = this._pickVariant('thrash', 4);
     const heavy = Math.max(0.7, Math.min(1.45, 0.75 + strength * 0.28));
 
@@ -973,8 +984,8 @@ class SoundEngine {
     if (heavy > 1.05) this.playPierCreak();
   }
 
-  playFishCalm(pan = 0.2) {
-    if (this._playSample('fish_calm', 0.65, 0.06, 1.0, 0.26, pan)) return;
+  playFishCalm(pan = 0.2, depth = 0.35) {
+    if (this._playSample('fish_calm', 0.65, 0.06, 1.0, 0.22, pan, depth)) return;
     this._filteredNoise({
       dur: 0.16, vol: 0.07, pink: true,
       filterType: 'lowpass', freqStart: 620, freqEnd: 240, q: 1.0, attack: 0.02, wet: 0.30, pan,
@@ -1038,8 +1049,8 @@ class SoundEngine {
     this.playSplash(false, pan);
   }
 
-  playEscape(pan = 0.2) {
-    if (this._playSample('escape', 0.78, 0.05, 1.0, 0.20, pan)) return;
+  playEscape(pan = 0.2, depth = 0.45) {
+    if (this._playSample('escape', 0.78, 0.05, 1.0, 0.20, pan, depth)) return;
     this.playSplash(false, pan);
     this._osc(180, 82, 0.18, 'sine', 0.11, 0.04, 0.28, 0.008, pan);
     this._bubble(440, 0.05, 0.05, 0.08, pan);
@@ -1059,8 +1070,8 @@ class SoundEngine {
   }
 
   // ── Predator Ambush & World Events ────────────────────────────────────────
-  playAmbushAlert(pan = 0.25) {
-    if (this._playSample('ambush_alert', 0.82, 0.05, 1.0, 0.24, pan)) return;
+  playAmbushAlert(pan = 0.25, depth = 0.55) {
+    if (this._playSample('ambush_alert', 0.88, 0.05, 1.0, 0.22, pan, depth)) return;
     this._osc(78, 52, 0.26, 'sine', 0.19, 0, 0.34, 0.018, pan);
     this._osc(116.5, 98, 0.22, 'triangle', 0.11, 0.02, 0.30, 0.015, pan);
     this._filteredNoise({
@@ -1071,8 +1082,16 @@ class SoundEngine {
     this._bubble(340, 0.05, 0.055, 0.12, pan);
   }
 
-  playChomp(chain = 1, pan = 0.25) {
-    if (this._playSample('predator_chomp', 0.90, 0.04, Math.max(0.76, 1.02 - (chain - 1) * 0.07), 0.20, pan)) return;
+  playPreyPanic(pan = 0.25, depth = 0.5) {
+    if (this._playSample('prey_panic', 0.72, 0.07, 1.0, 0.18, pan, depth)) return;
+    this._filteredNoise({
+      dur: 0.18, vol: 0.12, pink: true,
+      filterType: 'lowpass', freqStart: 540, freqEnd: 240, q: 1.4, attack: 0.01, wet: 0.25, pan,
+    });
+  }
+
+  playChomp(chain = 1, pan = 0.25, depth = 0.45) {
+    if (this._playSample('predator_chomp', 0.94, 0.04, Math.max(0.76, 1.02 - (chain - 1) * 0.07), 0.20, pan, depth * 0.75)) return;
     const pitchBoost = 1 + Math.min(2, Math.max(0, chain - 1)) * 0.12;
     this._osc(96, 34, 0.24, 'sine', 0.26, 0, 0.30, 0.003, pan);
     this._filteredNoise({

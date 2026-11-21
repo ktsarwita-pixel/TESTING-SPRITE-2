@@ -125,6 +125,11 @@
       "ambush_alert_2.wav",
       "ambush_alert_3.wav"
     ],
+    "prey_panic": [
+      "prey_panic_1.wav",
+      "prey_panic_2.wav",
+      "prey_panic_3.wav"
+    ],
     "predator_chomp": [
       "predator_chomp_1.wav",
       "predator_chomp_2.wav",

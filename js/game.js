@@ -1096,6 +1096,11 @@ class PierlineGame {
     return clamp((x / Math.max(1, this.vw)) * 1.6 - 0.8, -0.82, 0.82);
   }
 
+  depthAtY(x, y) {
+    const col = Math.max(18, this.getSeabedY(x) - this.waterY);
+    return clamp((y - this.waterY) / col, 0, 1);
+  }
+
   getNightFactor() {
     const t = this.timeOfDay;
     if (t >= 0.28 && t <= 0.62) return 0;
@@ -1176,8 +1181,9 @@ class PierlineGame {
     if (!predator || !this.activeFish || predator === this.activeFish) return;
     predator.ai = 'AMBUSH';
     predator.ambushTimer = 3.6;
+    predator.preyPanicked = false;
     predator.dir = this.activeFish.x >= predator.x ? 1 : -1;
-    sound.playAmbushAlert(this.panAtX(predator.x));
+    sound.playAmbushAlert(this.panAtX(predator.x), this.depthAtY(predator.x, predator.y));
     this.spawnFloat(predator.x, Math.max(this.waterY + 10, predator.y - 10), 'AMBUSH!', '#fb7185');
   }
 
@@ -1223,7 +1229,7 @@ class PierlineGame {
     this.spawnRipple(this.bobberX, this.waterY);
     this.shakeTime = 0.24;
     this.shakeMag = 2.6;
-    sound.playChomp(this.swallowCount, this.panAtX(cx));
+    sound.playChomp(this.swallowCount, this.panAtX(cx), this.depthAtY(cx, cy));
 
     // Remove the eaten smaller fish & replace ambient ecosystem from edge
     this.fishes = this.fishes.filter((f) => f !== prey);
@@ -1940,7 +1946,7 @@ class PierlineGame {
         this.hookY = lerp(this.hookY, goalY, 1 - Math.exp(-statsNow.sinkRate * dt));
         if (!this.seabedTapped && goalY >= bedLimit - 2 && Math.abs(this.hookY - bedLimit) < 2.2) {
           this.seabedTapped = true;
-          sound.playSeabedTap(this.panAtX(this.hookX));
+          sound.playSeabedTap(this.panAtX(this.hookX), this.depthAtY(this.hookX, this.hookY));
         }
         this.rodFlex = lerp(this.rodFlex, 0.04, 1 - Math.exp(-6 * dt));
       }
@@ -2040,7 +2046,7 @@ class PierlineGame {
         this.fishFightState = 'WARNING';
         this.fishThrashing = false;
         this.fishFightTimer = 0.45;
-        sound.playFishWarning(this.panAtX(fish.x));
+        sound.playFishWarning(this.panAtX(fish.x), this.depthAtY(fish.x, fish.y));
         this.updateControlsUI();
       } else if (this.fishFightState === 'WARNING') {
         this.fishFightState = 'THRASH';
@@ -2048,7 +2054,7 @@ class PierlineGame {
         // Fish tires progressively over the fight as stamina drains!
         const tireFactor = clamp(this.fishStamina, 0.45, 1.35);
         this.fishFightTimer = rand(0.55, 0.78 + strength * 0.22) * tireFactor;
-        sound.playFishThrash(this.panAtX(fish.x), strength);
+        sound.playFishThrash(this.panAtX(fish.x), strength, this.depthAtY(fish.x, fish.y) * 0.55);
         this.spawnSplash(this.bobberX, this.waterY, 6);
         this.updateControlsUI();
       } else {
@@ -2056,7 +2062,7 @@ class PierlineGame {
         this.fishThrashing = false;
         this.fishStamina = Math.max(0.42, this.fishStamina - stats.staminaDrain);
         this.fishFightTimer = rand(0.95, 1.55 - Math.min(0.4, strength * 0.12));
-        sound.playFishCalm(this.panAtX(fish.x));
+        sound.playFishCalm(this.panAtX(fish.x), this.depthAtY(fish.x, fish.y));
         this.updateControlsUI();
       }
     }
@@ -2259,6 +2265,10 @@ class PierlineGame {
 
         const preySpr = this.sprites.fish[prey.species.id];
         const eatDist = Math.max(8, preySpr ? preySpr.w * 0.45 : 8);
+        if (!f.preyPanicked && dist <= eatDist * 3.4) {
+          f.preyPanicked = true;
+          sound.playPreyPanic(this.panAtX(prey.x), this.depthAtY(prey.x, prey.y));
+        }
         if (dist <= eatDist) {
           this.triggerFishSwallow(f, prey);
           ambusherCount = 0;
@@ -2378,7 +2388,7 @@ class PierlineGame {
             f.ai = 'CURIOUS';
             f.inspectSide = f.x <= this.hookX ? -1 : 1;
             f.inspectTimer = rand(0.35, 0.65);
-            sound.playFishCurious(this.panAtX(f.x));
+            sound.playFishCurious(this.panAtX(f.x), this.depthAtY(f.x, f.y));
             engagedCount = 1;
           }
         } else if (

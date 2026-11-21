@@ -56,6 +56,7 @@ PACK_SPEC = [
     ('fish_calm', 'fish_calm', 3),
     ('landing_lift', 'landing_lift', 3),
     ('ambush_alert', 'ambush_alert', 3),
+    ('prey_panic', 'prey_panic', 3),
     ('predator_chomp', 'predator_chomp', 3),
     ('catch_common', 'catch_common', 2),
     ('catch_rare', 'catch_rare', 2),
