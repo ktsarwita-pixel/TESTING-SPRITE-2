@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { rotSpriteRows } from '../../js/sprites.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -251,32 +252,30 @@ export function rasterizeFrame(fishId, st) {
     extraOps.push({ op: 'rect', x: bx - spread + 2, y: wy, w: Math.max(4, (spread - 2) * 2), h: 1, c: '#ffffff', a: fade * 0.92 });
   }
 
-  // 2. Sleek Tapered Aerodynamic Slipstream Smear Ribbon + 2 clean parallel slipstream needles!
+  // 2. Sleek Slim 16-Bit Aerodynamic Slipstream Ribbon (matching js/renderer.js 1:1!)
   if (land.windTrail && land.windTrail.length >= 3) {
-    const layers = [
-      { maxW: 4.8, col: '#38bdf8', alpha: 0.34 },
-      { maxW: 2.8, col: '#bae6fd', alpha: 0.56 },
-      { maxW: 1.3, col: '#ffffff', alpha: 0.84 },
-    ];
-    for (const lay of layers) {
-      for (let i = 0; i < land.windTrail.length - 1; i++) {
-        const a = land.windTrail[i], b = land.windTrail[i + 1];
-        const uMid = (a.u + b.u) * 0.5;
-        const taper = Math.sin(clamp(uMid, 0.04, 1) * Math.PI * 0.82) * Math.pow(1 - uMid, 0.72);
-        const halfW = lay.maxW * taper;
-        if (halfW < 0.25) continue;
-        const steps = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 1.4));
-        const sz = Math.max(1, Math.round(halfW * 2));
-        for (let st2 = 0; st2 <= steps; st2++) {
-          const f = st2 / steps;
-          extraOps.push({ op: 'rect', x: Math.round(lerp(a.x, b.x, f) - sz * 0.5), y: Math.round(lerp(a.y, b.y, f) - sz * 0.5), w: sz, h: sz, c: lay.col, a: lay.alpha * (1 - uMid * 0.82) });
-        }
+    for (let i = 0; i < land.windTrail.length - 1; i++) {
+      const a = land.windTrail[i], b = land.windTrail[i + 1];
+      const uMid = (a.u + b.u) * 0.5;
+      const fade = Math.pow(1 - uMid, 1.15);
+      if (fade <= 0.06) continue;
+      const thick = Math.sin(clamp(uMid, 0.06, 1) * Math.PI * 0.85) * (1 - uMid * 0.72);
+      if (thick > 0.25) {
+        const off = thick * 2.2;
+        extraOps.push({ op: 'line', x0: a.x + a.nx * off, y0: a.y + a.ny * off, x1: b.x + b.nx * off, y1: b.y + b.ny * off, c: '#38bdf8', a: fade * 0.36 });
+        extraOps.push({ op: 'line', x0: a.x - a.nx * off, y0: a.y - a.ny * off, x1: b.x - b.nx * off, y1: b.y - b.ny * off, c: '#38bdf8', a: fade * 0.36 });
       }
+      if (thick > 0.12) {
+        const off2 = thick * 1.05;
+        extraOps.push({ op: 'line', x0: a.x + a.nx * off2, y0: a.y + a.ny * off2, x1: b.x + b.nx * off2, y1: b.y + b.ny * off2, c: '#bae6fd', a: fade * 0.58 });
+        extraOps.push({ op: 'line', x0: a.x - a.nx * off2, y0: a.y - a.ny * off2, x1: b.x - b.nx * off2, y1: b.y - b.ny * off2, c: '#bae6fd', a: fade * 0.58 });
+      }
+      extraOps.push({ op: 'line', x0: a.x, y0: a.y, x1: b.x, y1: b.y, c: '#ffffff', a: fade * 0.88 });
     }
     for (const side of [-1, 1]) {
-      for (let i = 1; i < Math.min(land.windTrail.length - 2, 8); i++) {
+      for (let i = 1; i < Math.min(land.windTrail.length - 3, 7); i++) {
         const a = land.windTrail[i], b = land.windTrail[i + 1];
-        extraOps.push({ op: 'line', x0: a.x + a.nx * side * 4.5, y0: a.y + a.ny * side * 4.5, x1: b.x + b.nx * side * 4.5, y1: b.y + b.ny * side * 4.5, c: i <= 3 ? '#ffffff' : '#bae6fd', a: (1 - a.u) * 0.70 });
+        extraOps.push({ op: 'line', x0: a.x + a.nx * side * 4.2, y0: a.y + a.ny * side * 4.2, x1: b.x + b.nx * side * 4.2, y1: b.y + b.ny * side * 4.2, c: i <= 2 ? '#ffffff' : '#bae6fd', a: (1 - a.u) * 0.56 });
       }
     }
   }
@@ -297,15 +296,15 @@ export function rasterizeFrame(fishId, st) {
     }
   }
 
-  // 4. Rotated Speed Afterimage Ghosts during launch!
+  // 4. RotSprite Speed Afterimage Ghosts during launch!
   if (land.ghosts) {
     for (let i = land.ghosts.length - 1; i >= 0; i--) {
       const gh = land.ghosts[i];
-      extraOps.push({
-        op: 'rotImg', id: fishId, mode: gh.mode,
-        cx: gh.x, cy: gh.y, angle: gh.angle || 0, sx: gh.sx || 1, sy: gh.sy || 1,
-        a: gh.alpha, flash: false,
-      });
+      const qDeg = Math.round(((gh.angle || 0) * 180) / Math.PI / 2) * 2;
+      const rRows = rotSpriteRows(FISH_SPRITES[fishId][0], gh.mode === 'left', (qDeg * Math.PI) / 180);
+      const dw = Math.max(1, Math.round(rRows[0].length * (gh.sx || 1)));
+      const dh = Math.max(1, Math.round(rRows.length * (gh.sy || 1)));
+      extraOps.push({ op: 'rowsImg', rows: rRows, x: Math.round(gh.x - dw / 2), y: Math.round(gh.y - dh / 2), dw, dh, a: gh.alpha, flash: false });
     }
   }
 
@@ -333,35 +332,34 @@ export function rasterizeFrame(fishId, st) {
     }
   }
 
-  // 6. Main fish sprite (smooth aerial rotation + velocity squash/stretch + white hitFlash + exact 0px flush grounding!)
+  // 6. Main fish sprite (3x-supersampled RotSprite + smooth effSX turnaround + exact 0px flush grounding!)
   const grid = getFishGrid(fishId, land.mode);
   const imgW = grid[0].length;
   const imgH = grid.length;
   const fAng = land.angle || 0;
-  const fsx = land.squashX || 1;
+  const fsx = land.effSX || land.squashX || 1;
   const fsy = land.squashY || 1;
   let lowestFishOpaqueY = -999;
   let fishMinX = 9999, fishMaxX = -9999;
 
-  if (Math.abs(fAng) > 0.015) {
-    extraOps.push({ op: 'rotImg', id: fishId, mode: land.mode, cx: land.x, cy: land.y, angle: fAng, sx: fsx, sy: fsy, a: 1, flash: !!land.hitFlash });
-    const sw = imgW * fsx, sh = imgH * fsy;
-    const cos = Math.cos(fAng), sin = Math.sin(fAng);
-    const bw = Math.ceil(Math.abs(sw * cos) + Math.abs(sh * sin)) + 2;
-    const bh = Math.ceil(Math.abs(sw * sin) + Math.abs(sh * cos)) + 2;
-    const x0 = Math.floor(land.x - bw / 2), y0 = Math.floor(land.y - bh / 2);
-    for (let py = y0; py <= y0 + bh; py++) {
-      for (let px = x0; px <= x0 + bw; px++) {
-        const dx = px - land.x, dy = py - land.y;
-        const rx = (dx * cos + dy * sin) / fsx + imgW * 0.5;
-        const ry = (-dx * sin + dy * cos) / fsy + imgH * 0.5;
-        const rxi = Math.floor(rx), ryi = Math.floor(ry);
-        if (rxi < 0 || rxi >= imgW || ryi < 0 || ryi >= imgH) continue;
-        if (grid[ryi][rxi] === '.') continue;
-        if (py > lowestFishOpaqueY) lowestFishOpaqueY = py;
-        if (px < fishMinX) fishMinX = px;
-        if (px > fishMaxX) fishMaxX = px;
-        fishPx.add(`${px},${py}`);
+  if (Math.abs(fAng) > 0.025) {
+    const qDeg = Math.round((fAng * 180) / Math.PI / 2) * 2;
+    const rRows = rotSpriteRows(FISH_SPRITES[fishId][0], land.mode === 'left', (qDeg * Math.PI) / 180);
+    const dw = Math.max(1, Math.round(rRows[0].length * fsx));
+    const dh = Math.max(1, Math.round(rRows.length * fsy));
+    const ix = Math.round(land.x - dw / 2);
+    const iy = Math.round(land.y - dh / 2);
+    extraOps.push({ op: 'rowsImg', rows: rRows, x: ix, y: iy, dw, dh, a: 1, flash: !!land.hitFlash });
+    for (let ry = 0; ry < dh; ry++) {
+      const sy2 = Math.min(rRows.length - 1, Math.floor((ry / dh) * rRows.length));
+      for (let rx = 0; rx < dw; rx++) {
+        const sx2 = Math.min(rRows[0].length - 1, Math.floor((rx / dw) * rRows[0].length));
+        if (rRows[sy2][sx2] === '.') continue;
+        const wy = iy + ry, wx = ix + rx;
+        if (wy > lowestFishOpaqueY) lowestFishOpaqueY = wy;
+        if (wx < fishMinX) fishMinX = wx;
+        if (wx > fishMaxX) fishMaxX = wx;
+        fishPx.add(`${wx},${wy}`);
       }
     }
   } else {
@@ -369,7 +367,7 @@ export function rasterizeFrame(fishId, st) {
     const dh = Math.max(1, Math.round(imgH * fsy));
     const ix = Math.round(land.x - dw / 2);
     let iy = Math.round(land.y - dh / 2);
-    const maxOpaqueIy = g.pierY + 1 + Math.round((land.activePad || 0) * fsy) - dh;
+    const maxOpaqueIy = g.pierY + 1 + Math.floor((land.activePad || 0) * fsy) - dh;
     if (ix <= g.pierEndX + 1 && iy > maxOpaqueIy) iy = maxOpaqueIy;
     extraOps.push({ op: 'img', id: fishId, mode: land.mode, x: ix, y: iy, dw, dh, a: 1, flash: !!land.hitFlash });
     for (let ry = 0; ry < dh; ry++) {
@@ -608,6 +606,21 @@ export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap 
               for (let rx = 0; rx < dw; rx++) {
                 const sx2 = Math.min(grid[0].length - 1, Math.floor((rx / dw) * grid[0].length));
                 const ch = grid[sy2][sx2];
+                if (ch === '.') continue;
+                const rgb = op.flash ? [255, 255, 255] : hexRgb(PALETTE[ch]);
+                putCell(ox, oy, Math.round(op.x) + rx, Math.round(op.y) + ry, rgb, a);
+              }
+            }
+          } else if (op.op === 'rowsImg') {
+            const rRows = op.rows;
+            const a = op.a ?? 1;
+            const dw = op.dw || rRows[0].length;
+            const dh = op.dh || rRows.length;
+            for (let ry = 0; ry < dh; ry++) {
+              const sy2 = Math.min(rRows.length - 1, Math.floor((ry / dh) * rRows.length));
+              for (let rx = 0; rx < dw; rx++) {
+                const sx2 = Math.min(rRows[0].length - 1, Math.floor((rx / dw) * rRows[0].length));
+                const ch = rRows[sy2][sx2];
                 if (ch === '.') continue;
                 const rgb = op.flash ? [255, 255, 255] : hexRgb(PALETTE[ch]);
                 putCell(ox, oy, Math.round(op.x) + rx, Math.round(op.y) + ry, rgb, a);

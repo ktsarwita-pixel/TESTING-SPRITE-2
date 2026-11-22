@@ -1,3 +1,4 @@
+import { getRotSpriteCanvas } from './sprites.js';
 // Crisp 16-bit 2D pixel-art side-POV renderer supporting 5 distinct fishing maps, rich night variations & zero-blur bitmap text.
 import { getMapById } from './maps.js';
 import { computeAnglerRig, renderArticulatedAngler } from './anglerRenderer.js';
@@ -1334,40 +1335,41 @@ function drawWaterBreachPlume(ctx, plume) {
 function drawTaperedSlipstream(ctx, trail) {
   if (!trail || trail.length < 3) return;
   ctx.save();
-  const layers = [
-    { maxW: 4.8, col: '#38bdf8', alpha: 0.34 },
-    { maxW: 2.8, col: '#bae6fd', alpha: 0.56 },
-    { maxW: 1.3, col: '#ffffff', alpha: 0.84 },
-  ];
-  for (const lay of layers) {
-    ctx.fillStyle = lay.col;
-    for (let i = 0; i < trail.length - 1; i++) {
-      const a = trail[i];
-      const b = trail[i + 1];
-      const uMid = (a.u + b.u) * 0.5;
-      const taper = Math.sin(clamp(uMid, 0.04, 1) * Math.PI * 0.82) * Math.pow(1 - uMid, 0.72);
-      const halfW = lay.maxW * taper;
-      if (halfW < 0.25) continue;
-      ctx.globalAlpha = lay.alpha * (1 - uMid * 0.82);
+  // Sleek, non-bulky 16-bit aerodynamic wind comet ribbon: soft sky-cyan outer wash + crisp white core!
+  for (let i = 0; i < trail.length - 1; i++) {
+    const a = trail[i];
+    const b = trail[i + 1];
+    const uMid = (a.u + b.u) * 0.5;
+    const fade = Math.pow(1 - uMid, 1.15);
+    if (fade <= 0.06) continue;
+    const thick = Math.sin(clamp(uMid, 0.06, 1) * Math.PI * 0.85) * (1 - uMid * 0.72);
 
-      const steps = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 1.4));
-      for (let st = 0; st <= steps; st++) {
-        const f = st / steps;
-        const px = lerp(a.x, b.x, f);
-        const py = lerp(a.y, b.y, f);
-        const sz = Math.max(1, Math.round(halfW * 2));
-        ctx.fillRect(Math.round(px - sz * 0.5), Math.round(py - sz * 0.5), sz, sz);
-      }
+    // Outer translucent sky-blue slipstream edge (offset +/- 1.8px along curve normal)
+    if (thick > 0.25) {
+      const off = thick * 2.2;
+      ctx.globalAlpha = fade * 0.36;
+      drawPixelLine(ctx, a.x + a.nx * off, a.y + a.ny * off, b.x + b.nx * off, b.y + b.ny * off, '#38bdf8');
+      drawPixelLine(ctx, a.x - a.nx * off, a.y - a.ny * off, b.x - b.nx * off, b.y - b.ny * off, '#38bdf8');
     }
+    // Mid bright ice-cyan body (+/- 0.9px)
+    if (thick > 0.12) {
+      const off2 = thick * 1.05;
+      ctx.globalAlpha = fade * 0.58;
+      drawPixelLine(ctx, a.x + a.nx * off2, a.y + a.ny * off2, b.x + b.nx * off2, b.y + b.ny * off2, '#bae6fd');
+      drawPixelLine(ctx, a.x - a.nx * off2, a.y - a.ny * off2, b.x - b.nx * off2, b.y - b.ny * off2, '#bae6fd');
+    }
+    // Razor-sharp white aerodynamic centerline!
+    ctx.globalAlpha = fade * 0.88;
+    drawPixelLine(ctx, a.x, a.y, b.x, b.y, '#ffffff');
   }
 
-  // 2 sleek crisp parallel slipstream needle streaks offset cleanly beside the ribbon (zero squiggles!)
+  // 2 delicate crisp parallel wind-slice wisps trailing cleanly off the fin tips
   for (const side of [-1, 1]) {
-    const offDist = side * 4.5;
-    for (let i = 1; i < Math.min(trail.length - 2, 8); i++) {
+    const offDist = side * 4.2;
+    for (let i = 1; i < Math.min(trail.length - 3, 7); i++) {
       const a = trail[i];
       const b = trail[i + 1];
-      const fade = (1 - a.u) * 0.70;
+      const fade = (1 - a.u) * 0.56;
       if (fade <= 0.08) continue;
       ctx.globalAlpha = fade;
       drawPixelLine(
@@ -1376,7 +1378,7 @@ function drawTaperedSlipstream(ctx, trail) {
         a.y + a.ny * offDist,
         b.x + b.nx * offDist,
         b.y + b.ny * offDist,
-        i <= 3 ? '#ffffff' : '#bae6fd'
+        i <= 2 ? '#ffffff' : '#bae6fd'
       );
     }
   }
@@ -1406,40 +1408,40 @@ function drawBowWaveCrescent(ctx, bw) {
   ctx.restore();
 }
 
-// Helper: draw crisp nearest-neighbor rotated/squashed sprite around (cx, cy)
-function drawCrispFishSprite(ctx, img, cx, cy, angle, sx, sy, pierY, pierEndX, framePad, clampToPier) {
-  const needsTransform = Math.abs(angle) > 0.015 || Math.abs(sx - 1) > 0.015 || Math.abs(sy - 1) > 0.015;
-  if (!needsTransform) {
-    const dx = Math.round(cx - img.width / 2);
-    let dy = Math.round(cy - img.height / 2);
-    if (clampToPier) {
-      const maxOpaqueDy = pierY + 1 + framePad - img.height;
-      if (dx <= pierEndX + 1 && dy > maxOpaqueDy) dy = maxOpaqueDy;
-    }
-    ctx.drawImage(img, dx, dy);
-    return { dx, dy, drawW: img.width, drawH: img.height };
-  }
-  if (Math.abs(angle) <= 0.015) {
-    const drawW = Math.max(1, Math.round(img.width * sx));
-    const drawH = Math.max(1, Math.round(img.height * sy));
+// Helper: draw ultra-crisp 3x-supersampled RotSprite rotated/squashed/grounded fish!
+function drawCrispFishSprite(ctx, img, fishId, mode, frame, flashWhite, cx, cy, angle, sx, sy, pierY, pierEndX, framePad, clampToPier) {
+  const absAng = Math.abs(angle || 0);
+  if (absAng > 0.025) {
+    // True 3x-supersampled outline-preserving RotSprite (ZERO jagged tearing or broken 1px outlines!)
+    const rotImg = getRotSpriteCanvas(fishId, mode, frame, angle, flashWhite) || img;
+    const drawW = Math.max(1, Math.round(rotImg.width * sx));
+    const drawH = Math.max(1, Math.round(rotImg.height * sy));
     const dx = Math.round(cx - drawW / 2);
-    let dy = Math.round(cy - drawH / 2);
-    if (clampToPier) {
-      const scaledPad = Math.round(framePad * sy);
-      const maxOpaqueDy = pierY + 1 + scaledPad - drawH;
-      if (dx <= pierEndX + 1 && dy > maxOpaqueDy) dy = maxOpaqueDy;
+    const dy = Math.round(cy - drawH / 2);
+    ctx.imageSmoothingEnabled = false;
+    if (drawW === rotImg.width && drawH === rotImg.height) {
+      ctx.drawImage(rotImg, dx, dy);
+    } else {
+      ctx.drawImage(rotImg, dx, dy, drawW, drawH);
     }
-    ctx.drawImage(img, dx, dy, drawW, drawH);
     return { dx, dy, drawW, drawH };
   }
-  ctx.save();
+  const drawW = Math.max(1, Math.round(img.width * sx));
+  const drawH = Math.max(1, Math.round(img.height * sy));
+  const dx = Math.round(cx - drawW / 2);
+  let dy = Math.round(cy - drawH / 2);
+  if (clampToPier) {
+    const scaledPad = Math.floor(framePad * sy);
+    const maxOpaqueDy = pierY + 1 + scaledPad - drawH;
+    if (dx <= pierEndX + 1 && dy > maxOpaqueDy) dy = maxOpaqueDy;
+  }
   ctx.imageSmoothingEnabled = false;
-  ctx.translate(Math.round(cx), Math.round(cy));
-  ctx.rotate(angle);
-  ctx.scale(sx, sy);
-  ctx.drawImage(img, -Math.round(img.width / 2), -Math.round(img.height / 2));
-  ctx.restore();
-  return { dx: Math.round(cx - img.width / 2), dy: Math.round(cy - img.height / 2), drawW: img.width, drawH: img.height };
+  if (drawW === img.width && drawH === img.height) {
+    ctx.drawImage(img, dx, dy);
+  } else {
+    ctx.drawImage(img, dx, dy, drawW, drawH);
+  }
+  return { dx, dy, drawW, drawH };
 }
 
 // Foreground pass for the Over-Reel Back-of-Dock Launch (LANDING) AND grounded trophy (CAUGHT)!
@@ -1516,7 +1518,7 @@ function renderLandingFishForeground(g, ctx) {
       const gImg = getOrientedFishFrame(sprSet, gh.mode, ghostFrame + i);
       ctx.save();
       ctx.globalAlpha = gh.alpha;
-      drawCrispFishSprite(ctx, gImg, gh.x, gh.y, gh.angle || 0, gh.sx || 1, gh.sy || 1, g.pierY, g.pierEndX, 0, false);
+      drawCrispFishSprite(ctx, gImg, sp.id, gh.mode, ghostFrame + i, false, gh.x, gh.y, gh.angle || 0, gh.sx || 1, gh.sy || 1, g.pierY, g.pierEndX, 0, false);
       ctx.restore();
     }
   }
@@ -1563,10 +1565,14 @@ function renderLandingFishForeground(g, ctx) {
   const placed = drawCrispFishSprite(
     ctx,
     img,
+    sp.id,
+    land.mode,
+    frame,
+    !!land.hitFlash,
     land.x,
     land.y + padDelta,
     land.angle || 0,
-    land.squashX || 1,
+    land.effSX || land.squashX || 1,
     land.squashY || 1,
     g.pierY,
     g.pierEndX,

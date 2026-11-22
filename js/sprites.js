@@ -355,3 +355,114 @@ export function spriteToDataURL(canvas, scale = 4) {
   ctx.drawImage(canvas, 0, 0, out.width, out.height);
   return out.toDataURL();
 }
+
+// 3x-Supersampled Outline-Preserving RotSprite pixel rotator!
+// Keeps 1px dark outlines unbroken, preserves eyes, zero blurry AA mud, zero jagged tearing!
+const _rotCache = new Map();
+
+function isDarkOutlineRgb(r, g, b) {
+  return (r * 0.299 + g * 0.587 + b * 0.114) < 58;
+}
+
+export function rotSpriteRows(rows, flipX, angleRad, palette = PALETTE) {
+  const h = rows.length;
+  const w = rows[0].length;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const outW = Math.ceil(Math.abs(w * cos) + Math.abs(h * sin)) + 2;
+  const outH = Math.ceil(Math.abs(w * sin) + Math.abs(h * cos)) + 2;
+  const hcx = (outW - 1) * 0.5;
+  const hcy = (outH - 1) * 0.5;
+  const scx = (w - 1) * 0.5;
+  const scy = (h - 1) * 0.5;
+
+  const outRows = [];
+  const subOffsets = [-0.28, 0, 0.28];
+
+  for (let py = 0; py < outH; py++) {
+    let line = '';
+    const dy0 = py - hcy;
+    for (let px = 0; px < outW; px++) {
+      const dx0 = px - hcx;
+      // 3x3 subpixel supersampling inside destination pixel for silky smooth edges & solid 1px outlines!
+      let hits = 0;
+      let outlineHits = 0;
+      let outlineChar = null;
+      let centerChar = '.';
+      const counts = Object.create(null);
+
+      for (let sy = 0; sy < 3; sy++) {
+        const dy = dy0 + subOffsets[sy];
+        for (let sx = 0; sx < 3; sx++) {
+          const dx = dx0 + subOffsets[sx];
+          const rx = dx * cos + dy * sin + scx;
+          const ry = -dx * sin + dy * cos + scy;
+          const ix = Math.round(rx);
+          const iy = Math.round(ry);
+          if (ix < 0 || ix >= w || iy < 0 || iy >= h) continue;
+          const srcX = flipX ? (w - 1 - ix) : ix;
+          const ch = rows[iy][srcX];
+          if (!ch || ch === '.' || !palette[ch]) continue;
+          hits++;
+          counts[ch] = (counts[ch] || 0) + 1;
+          if (sx === 1 && sy === 1) centerChar = ch;
+          const hex = palette[ch];
+          const r = parseInt(hex.slice(1, 3), 16);
+          const g = parseInt(hex.slice(3, 5), 16);
+          const b = parseInt(hex.slice(5, 7), 16);
+          if (isDarkOutlineRgb(r, g, b)) {
+            outlineHits++;
+            outlineChar = ch;
+          }
+        }
+      }
+
+      if (hits >= 4 || (outlineHits >= 2 && hits >= 3)) {
+        if (centerChar !== '.' && counts[centerChar] >= 4) {
+          line += centerChar;
+        } else if (outlineHits >= 3 && outlineChar && hits < 7) {
+          // Preserve crisp 1px dark perimeter outline during rotation!
+          line += outlineChar;
+        } else {
+          // Majority-vote palette color (100% pure crisp pixel-art palette!)
+          let bestCh = centerChar !== '.' ? centerChar : '.';
+          let bestN = 0;
+          for (const k in counts) {
+            if (counts[k] > bestN) {
+              bestN = counts[k];
+              bestCh = k;
+            }
+          }
+          line += bestCh;
+        }
+      } else {
+        line += '.';
+      }
+    }
+    outRows.push(line);
+  }
+  return outRows;
+}
+
+export function getRotSpriteCanvas(fishId, mode, frameIdx, angleRad, flashWhite = false) {
+  const frames = FISH_SPRITES[fishId];
+  if (!frames) return null;
+  const fIdx = ((frameIdx % frames.length) + frames.length) % frames.length;
+  // Quantize to smooth 2-degree steps for instant O(1) cache hits & zero shimmer!
+  const qDeg = Math.round((angleRad * 180) / Math.PI / 2) * 2;
+  const flipX = mode === 'left';
+  const key = `${fishId}:${flipX ? 'L' : 'R'}:${fIdx}:${qDeg}:${flashWhite ? 'W' : 'C'}`;
+  let cached = _rotCache.get(key);
+  if (cached) return cached;
+
+  const qRad = (qDeg * Math.PI) / 180;
+  const rows = rotSpriteRows(frames[fIdx], flipX, qRad);
+  const canvas = makeCanvasFromRows(rows, flashWhite ? { silhouetteColor: '#ffffff' } : {});
+  if (_rotCache.size > 600) {
+    // Keep memory tiny & bounded
+    const firstKey = _rotCache.keys().next().value;
+    _rotCache.delete(firstKey);
+  }
+  _rotCache.set(key, canvas);
+  return canvas;
+}
