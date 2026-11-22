@@ -267,8 +267,8 @@ function makeCanvasFromRows(rows, options = {}) {
       if (!color) continue;
       ctx.fillStyle = silhouetteColor || color;
       if (rotateHang) {
-        // Exact lossless 90° pixel transpose: MOUTH (x=w-1) at TOP (dy=0), TAIL (x=0) hanging DOWN, dorsal/eye facing outward RIGHT!
-        const dx = h - 1 - y;
+        // Exact lossless 90° CCW pixel transpose: MOUTH (x=w-1) at TOP (dy=0), slim dorsal LEFT (dx=y), belly RIGHT, TAIL DOWN!
+        const dx = y;
         const dy = w - 1 - x;
         ctx.fillRect(dx, dy, 1, 1);
       } else {

@@ -29,6 +29,10 @@ const ALL_WORKERS = [
   'face-eye-qa',
   'catch-physics-qa',
   'silhouette-qa',
+  'noclip-body-qa',
+  'noclip-pier-qa',
+  'screenshotter-action',
+  'screenshotter-noclip',
 ];
 
 async function runSpriteInspector() {
@@ -396,7 +400,7 @@ async function runFaceEyeQA() {
       save: { upgrades: { rod: 3 } },
       activeFish: { species: { id: 'leviathan' } },
       lastCatchInfo: { species: { id: 'leviathan' } },
-      sprites: { fish: { leviathan: { w: sprW, h: sprH, right: Array(4).fill({ id: 'leviathan', width: sprW, height: sprH }), hang: Array(4).fill({ id: 'leviathan', width: sprH, height: sprW }) } } },
+      sprites: { fish: { leviathan: { w: sprW, h: sprH, right: Array(4).fill({ id: 'leviathan', width: sprW, height: sprH }), left: Array(4).fill({ id: 'leviathan', width: sprW, height: sprH }), hang: Array(4).fill({ id: 'leviathan', width: sprH, height: sprW }) } } },
     };
     renderArticulatedAngler(g, ctx);
     const rig = computeAnglerRig(g);
@@ -511,7 +515,7 @@ async function runSilhouetteQA() {
         fish: {
           [id]: {
             w: sprW, h: sprH,
-            right: Array(4).fill({ id, width: sprW, height: sprH }),
+            right: Array(4).fill({ id, width: sprW, height: sprH }), left: Array(4).fill({ id, width: sprW, height: sprH }),
             hang: Array(4).fill({ id, width: sprH, height: sprW }),
           },
         },
@@ -529,29 +533,16 @@ async function runSilhouetteQA() {
         issues.push(`${id}: hanging tail (${botTailY.toFixed(1)}) clips into pier (62)`);
       }
     } else {
-      if (rig.holdMode !== 'cradle') issues.push(`${id}: large fish should use belly/gill cradle ('cradle')`);
+      if (rig.holdMode !== 'gillHold') issues.push(`${id}: large fish should use head/gill-plate hold ('gillHold')`);
       const fishLeft = rig.catchHoldX - sprW / 2;
-      const fishTop = rig.catchHoldY - sprH / 2;
-      const gripFrac = (rig.reelX - fishLeft) / sprW;
-      // Hand MUST support mid-body/belly (>=22% from tail tip), NEVER pinch the tail tip!
-      if (gripFrac < 0.20 || gripFrac > 0.78) {
-        issues.push(`${id}: unrealistic tail/tip pinch (gripFrac=${gripFrac.toFixed(2)}, must be 0.20..0.78 belly/body)`);
+      const fishBot = rig.catchHoldY + sprH / 2;
+      // Since large fish faces LEFT (dir=-1), fishLeft IS THE HEAD/MOUTH — hand grips jaw/gill near fishLeft!
+      const headDist = rig.reelX - fishLeft;
+      if (headDist < -1.5 || headDist > sprW * 0.45) {
+        issues.push(`${id}: hand (${rig.reelX.toFixed(1)}) not gripping head/gill end (fishLeft=${fishLeft.toFixed(1)})`);
       }
-      // Pixel-exact face & eye clearance: verify ZERO opaque fish pixels overlap the angler's face/eye region!
-      const hx = Math.round(rig.headX), hy = Math.round(rig.headY);
-      const fx0 = Math.round(fishLeft), fy0 = Math.round(fishTop);
-      let faceOverlapPx = 0;
-      for (let ry = 0; ry < sprH; ry++) {
-        const wy = fy0 + ry;
-        if (wy < hy - 2 || wy > hy + 1) continue;
-        for (let rx = 0; rx < sprW; rx++) {
-          if (rows[ry][rx] === '.') continue;
-          const wx = fx0 + rx;
-          if (wx >= hx - 1 && wx <= hx + 3) faceOverlapPx++;
-        }
-      }
-      if (faceOverlapPx > 0) {
-        issues.push(`${id}: ${faceOverlapPx} opaque fish pixels overlap angler face/eye!`);
+      if (fishBot > 61.5) {
+        issues.push(`${id}: fish bottom (${fishBot.toFixed(1)}) clips pier (62)`);
       }
     }
   }
@@ -570,6 +561,102 @@ async function runSilhouetteQA() {
   };
 }
 
+
+async function runNoclipBodyQA() {
+  const { rasterizeFrame } = await import(path.join(__dirname, 'screenshotter.mjs'));
+  const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
+  const sampleTs = [0.08, 0.25, 0.42, 0.56, 0.65, 0.85, 1.0];
+  const issues = [];
+  let totalBadPx = 0;
+
+  for (const sp of FISH_SPECIES) {
+    let worst = 0;
+    let worstT = 0;
+    for (const st of sampleTs) {
+      const res = rasterizeFrame(sp.id, st);
+      if (res.bodyNoclips.length > worst) {
+        worst = res.bodyNoclips.length;
+        worstT = st;
+      }
+      totalBadPx += res.bodyNoclips.length;
+    }
+    if (worst > 0) {
+      issues.push(`${sp.id}: ${worst}px noclip into angler head/torso/legs at t=${worstT.toFixed(2)}`);
+    }
+  }
+  const score = Math.max(1, Number((10 - issues.length * 0.65).toFixed(1)));
+  return {
+    agent: 'noclip-body-qa',
+    score,
+    pass: issues.length === 0,
+    summary: `26 species x 7 frames raster-audited | ${issues.length} species noclipping body (${totalBadPx} bad px)`,
+    details: issues,
+  };
+}
+
+async function runNoclipPierQA() {
+  const { rasterizeFrame } = await import(path.join(__dirname, 'screenshotter.mjs'));
+  const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
+  const sampleTs = [0.08, 0.25, 0.42, 0.56, 0.65, 0.85, 1.0];
+  const issues = [];
+  let totalBadPx = 0;
+
+  for (const sp of FISH_SPECIES) {
+    let worst = 0;
+    let worstT = 0;
+    for (const st of sampleTs) {
+      const res = rasterizeFrame(sp.id, st);
+      if (res.pierNoclips.length > worst) {
+        worst = res.pierNoclips.length;
+        worstT = st;
+      }
+      totalBadPx += res.pierNoclips.length;
+    }
+    if (worst > 0) {
+      issues.push(`${sp.id}: ${worst}px noclip into wooden pier planks at t=${worstT.toFixed(2)}`);
+    }
+  }
+  const score = Math.max(1, Number((10 - issues.length * 0.85).toFixed(1)));
+  return {
+    agent: 'noclip-pier-qa',
+    score,
+    pass: issues.length === 0,
+    summary: `26 species x 7 frames raster-audited | ${issues.length} species noclipping pier (${totalBadPx} bad px)`,
+    details: issues,
+  };
+}
+
+async function runScreenshotterAction() {
+  const { renderScreenshotSheet } = await import(path.join(__dirname, 'screenshotter.mjs'));
+  const species = ['minnow', 'snapper', 'tuna', 'leviathan', 'krakentitan'];
+  const ts = [0.06, 0.24, 0.40, 0.56, 0.65, 0.85, 1.0];
+  const out = renderScreenshotSheet('/tmp/subagent_action_sheet.png', species, ts, { heatmap: false, scale: 2 });
+  const ok = fs.existsSync(out.outPath) && fs.statSync(out.outPath).size > 2000;
+  return {
+    agent: 'screenshotter-action',
+    score: ok ? 10 : 1,
+    pass: ok,
+    summary: `Captured ${species.length}x${ts.length} live-engine PNG -> ${out.outPath}`,
+    details: [out.outPath],
+  };
+}
+
+async function runScreenshotterNoclip() {
+  const { renderScreenshotSheet } = await import(path.join(__dirname, 'screenshotter.mjs'));
+  const species = ['minnow', 'snapper', 'tuna', 'leviathan', 'krakentitan'];
+  const ts = [0.06, 0.24, 0.40, 0.56, 0.65, 0.85, 1.0];
+  const out = renderScreenshotSheet('/tmp/subagent_noclip_heatmap.png', species, ts, { heatmap: true, scale: 2 });
+  const total = out.totalBodyNoclips + out.totalPierNoclips;
+  const score = total === 0 ? 10 : Math.max(1, Number((10 - Math.min(9, total * 0.04)).toFixed(1)));
+  return {
+    agent: 'screenshotter-noclip',
+    score,
+    pass: total === 0,
+    summary: `Heatmap -> ${out.outPath} | bodyNoclip=${out.totalBodyNoclips}px, pierNoclip=${out.totalPierNoclips}px`,
+    details: total === 0 ? [] : [`${out.totalBodyNoclips} magenta body-noclip px, ${out.totalPierNoclips} red pier-noclip px`],
+  };
+}
+
 const WORKER_MAP = {
   'sprite-inspector': runSpriteInspector,
   'audio-qa': runAudioQA,
@@ -579,6 +666,10 @@ const WORKER_MAP = {
   'face-eye-qa': runFaceEyeQA,
   'catch-physics-qa': runCatchPhysicsQA,
   'silhouette-qa': runSilhouetteQA,
+  'noclip-body-qa': runNoclipBodyQA,
+  'noclip-pier-qa': runNoclipPierQA,
+  'screenshotter-action': runScreenshotterAction,
+  'screenshotter-noclip': runScreenshotterNoclip,
 };
 
 const args = process.argv.slice(2);

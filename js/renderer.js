@@ -1258,22 +1258,19 @@ function renderLandingFishForeground(g, ctx) {
   const imgW = img.width || (isHangCaught ? sprSet.h : sprSet.w);
   const imgH = img.height || (isHangCaught ? sprSet.w : sprSet.h);
 
-  const sx = isHangCaught ? 1 : clamp(g.landingTurnScaleX ?? 1, 0.24, 1);
-  if (sx < 0.99) {
-    const drawW = Math.max(4, Math.round(imgW * sx));
-    const dx = Math.round(f.x - drawW / 2);
-    const dy = Math.round(f.y - imgH / 2);
-    ctx.drawImage(img, dx, dy, drawW, imgH);
-  } else {
-    const dx = Math.round(f.x - imgW / 2);
-    const dy = Math.round(f.y - imgH / 2);
-    ctx.drawImage(img, dx, dy);
-    if (!isHangCaught && f.species.id === 'angler') {
-      renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, dir, frame, g.time, f.phase, 0.5, 0.4);
-    }
+  const dx = Math.round(f.x - imgW / 2);
+  const dy = Math.round(f.y - imgH / 2);
+
+  if (isHangCaught && rig.catchHoldX - rig.reelX > 2.4) {
+    drawPixelLine(ctx, rig.reelX + 1, rig.reelY, rig.catchHoldX, dy + 1, '#e2e8f0');
   }
 
-  // Once caught (t >= 0.62), draw realistic foreground gripping fingers (mouth-lip grip OR cupped belly cradle!)
+  ctx.drawImage(img, dx, dy);
+  if (!isHangCaught && f.species.id === 'angler') {
+    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, dir, frame, g.time, f.phase, 0.5, 0.4);
+  }
+
+  // Once caught (t >= 0.62), draw realistic foreground gripping fingers (mouth-lip grip OR lower-jaw/gill grip!)
   if (t >= 0.62) {
     const rx = Math.round(rig.reelX);
     const ry = Math.round(rig.reelY);
@@ -1288,7 +1285,7 @@ function renderLandingFishForeground(g, ctx) {
       ctx.fillStyle = '#ffe0c4';
       ctx.fillRect(rx, ry - 1, 2, 1);
       ctx.fillStyle = '#f0b58b';
-      ctx.fillRect(rx - 1, ry, 3, 1);
+      ctx.fillRect(rx, ry, 3, 1);
       ctx.fillStyle = '#c2815d';
       ctx.fillRect(rx, ry + 1, 2, 1);
     }

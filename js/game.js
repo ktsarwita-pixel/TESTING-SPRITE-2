@@ -1248,7 +1248,9 @@ class PierlineGame {
     predator.vy = 0;
     this.activeFish = predator;
     this.mouthDirSmooth = predator.dir;
-    const landX = this.pierEndX + 10;
+    const fSprR = this.sprites.fish[fish.species.id];
+    const fishHalfWR = fSprR ? fSprR.w * 0.5 : 8;
+    const landX = this.pierEndX + Math.max(10, fishHalfWR + 3);
     const landY = this.waterY + 6;
     const newDist = Math.hypot(predator.x - landX, predator.y - landY);
     this.reelTotalDist = Math.max(28, newDist * 1.15);
@@ -2228,17 +2230,21 @@ class PierlineGame {
 
       let fx, fy;
       if (t < 0.62) {
-        // Real gravity physics: light fish whips higher & faster; heavy giants haul lower with dramatic effort!
+        // Real gravity physics: light fish whips higher & faster; heavy giants haul smoothly clear of the pier lip!
         const p = smoothstep(t / 0.62);
-        const arcPeak = lerp(22, 13, wf);
+        const arcPeak = lerp(22, 16, wf);
         const liftArc = Math.sin(p * Math.PI) * arcPeak;
-        fx = lerp(this.landingStartX, rig.catchHoldX, p);
+        const safeStartX = Math.max(this.landingStartX, this.pierEndX + sprW * 0.5 + 3);
+        fx = lerp(safeStartX, rig.catchHoldX, p);
         fy = lerp(this.landingStartY, rig.catchHoldY, p) - liftArc;
 
-        // Pier-edge vertical clearance guard: fish NEVER clips through the wooden dock lip!
-        if (fx <= this.pierEndX + sprW * 0.45) {
-          fy = Math.min(fy, this.pierY - sprH * 0.46 - 2);
+        // Strict pier-edge vertical clearance guard: ZERO fish pixels EVER clip through wooden dock planks!
+        if (fx - sprW * 0.5 <= this.pierEndX + 1) {
+          fy = Math.min(fy, this.pierY - sprH * 0.5 - 2);
         }
+        // Strict body clearance guard: ZERO fish pixels EVER fly through the angler's chest, head, or legs!
+        const minSafeX = Math.max(rig.shoulderX + 4.4, rig.headX + 3.6) + sprW * 0.5 + 0.6;
+        if (fx < minSafeX) fx = minSafeX;
 
         // Dramatic foaming water-breach burst + ripple + heavy-fish micro-shake as fish clears the waves!
         if (!this.landingBreachDone && fy < this.waterY - 2) {
@@ -2275,34 +2281,19 @@ class PierlineGame {
         fy = rig.catchHoldY;
       }
 
+      // Continuous head-first physics (dir=-1, mouth toward angler!):
+      //   'hang'     (<=25px): mouth arrives directly into hand and swings into lossless 90° vertical hang at t>=0.62!
+      //   'gillHold' (> 25px): head/gill-plate arrives directly into outstretched hand — ZERO weird 180° flip, ZERO noclip!
       const isHang = rig.holdMode === 'hang';
-      if (isHang) {
-        // Vertical mouth-hold fish flies head-first (mouth toward angler) straight into the hand,
-        // then swings cleanly into lossless 90° vertical hang right upon catch (t >= 0.62)!
-        this.landingTurnScaleX = 1;
-        if (this.activeFish) {
-          this.activeFish.x = fx;
-          this.activeFish.y = fy;
-          this.activeFish.dir = -1;
-        }
-        // Hook stays locked to fish's actual MOUTH (left tip while flying, top mouth once hanging vertically!)
-        this.hookX = t >= 0.62 ? fx : fx - (sprW * 0.42);
-        this.hookY = t >= 0.62 ? (fy - sprW * 0.42) : (fy + 0.8);
-      } else {
-        // Large/Giant fish flies head-first (0..0.54), then smoothly turns via crisp 16-bit scaleX flip (0.54..0.64)
-        // straight into the angler's underhand BELLY/GILL cradle!
-        const turnP = clamp((t - 0.54) / 0.10, 0, 1);
-        const rawTurnCos = -Math.cos(turnP * Math.PI); // -1 (facing left) -> +1 (facing right)
-        const faceDir = rawTurnCos >= 0 ? 1 : -1;
-        this.landingTurnScaleX = Math.max(0.24, Math.abs(rawTurnCos));
-        if (this.activeFish) {
-          this.activeFish.x = fx;
-          this.activeFish.y = fy;
-          this.activeFish.dir = faceDir;
-        }
-        this.hookX = fx + rawTurnCos * (sprW * 0.42);
-        this.hookY = fy + 0.8;
+      this.landingTurnScaleX = 1;
+      if (this.activeFish) {
+        this.activeFish.x = fx;
+        this.activeFish.y = fy;
+        this.activeFish.dir = -1;
       }
+      // Fishing line stays hooked to the fish's actual MOUTH (left snout while flying/gill-held, top mouth once hanging!)
+      this.hookX = (isHang && t >= 0.62) ? fx : fx - (sprW * 0.42);
+      this.hookY = (isHang && t >= 0.62) ? (fy - sprW * 0.42) : (fy + 0.8);
 
       // Realistic elastic rod-tip bend under heave (0..0.36) -> damped elastic whip rebound upon water breakout!
       const targetFlex = t < 0.36
@@ -2474,7 +2465,7 @@ class PierlineGame {
       fish.vy = (fish.vy / spd) * maxSpd;
     }
 
-    fish.x = clamp(fish.x + fish.vx * dt, this.pierEndX + 7, this.vw - 10);
+    fish.x = clamp(fish.x + fish.vx * dt, this.pierEndX + Math.max(7, fishHalfWR + 2), this.vw - 10);
     const minY = this.waterY + 5;
     const maxY = Math.max(minY + 4, this.getSeabedY(fish.x) - 6);
     fish.y = clamp(fish.y + fish.vy * dt, minY, maxY);
