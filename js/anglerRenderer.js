@@ -204,29 +204,62 @@ export function computeAnglerRig(g) {
     const calmBob = g.state === 'CAUGHT' ? Math.sin(ct * 3.2) * 0.55 : 0;
     const fishWriggleY = calmBob + initialFlop + flopBurst;
 
-    // Comfortably within <= 8.5px of frontShoulder (shoulderX - 1.4, shoulderY + 0.8): natural soft elbow bend!
-    const handMeetX = shoulderX + 6.3 + anticipateLift * 0.45;
-    const handMeetY = shoulderY + 1.5 - anticipateLift + catchDip;
-    // Heavy fish sits slightly lower & more braced; light fish lifts jauntier!
-    const handProudX = shoulderX + 6.9;
-    const handProudY = shoulderY - 0.75 + wf * 0.85 + fishWriggleY * 0.7;
+    // Determine realistic real-world hold mode by fish length:
+    //   'hang'   (sprW <= 25): Classic 1-hand vertical MOUTH/LIP hold (fish hangs straight down by gravity!)
+    //   'cradle' (sprW >  25): Realistic horizontal BELLY/GILL cradle hold (hand supports underneath center-belly, below chin!)
+    const fishObj = g.state === 'CAUGHT'
+      ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
+      : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]);
+    const sprW = fishObj ? (fishObj.w || (fishObj.right && fishObj.right[0] ? fishObj.right[0].width : 20)) : 20;
+    const sprH = fishObj ? (fishObj.h || (fishObj.right && fishObj.right[0] ? fishObj.right[0].height : 13)) : 13;
+    const holdMode = sprW <= 25 ? 'hang' : 'cradle';
+
     const raiseP = g.state === 'CAUGHT'
       ? 1
       : t <= 0.62
         ? 0
         : smoothstep(clamp((t - 0.62) / 0.38, 0, 1));
 
+    let handMeetX, handMeetY, handProudX, handProudY;
+    if (holdMode === 'hang') {
+      // Raised front hand gripping the fish's MOUTH/LIP at top while body hangs naturally downward above pier planks!
+      const extraLift = Math.max(0, (sprW - 19) * 0.32); // keeps 23-25px fish tails cleanly above pierY!
+      handMeetX = shoulderX + 6.4 + anticipateLift * 0.4;
+      handMeetY = shoulderY + 0.4 - extraLift * 0.5 - anticipateLift + catchDip;
+      handProudX = shoulderX + 6.6;
+      handProudY = shoulderY - 1.6 - extraLift + calmBob * 0.5;
+    } else {
+      // Natural underhand BELLY/GILL cradle at chest/waist level — well below chin & crisp visible eye!
+      handMeetX = shoulderX + 5.7 + anticipateLift * 0.35;
+      handMeetY = shoulderY + 4.4 - anticipateLift * 0.6 + catchDip * 0.85;
+      handProudX = shoulderX + 5.9;
+      handProudY = shoulderY + 4.9 + wf * 0.4 + fishWriggleY * 0.45;
+    }
+
     const holdHandX = lerp(handMeetX, handProudX, raiseP);
     const holdHandY = lerp(handMeetY, handProudY, raiseP);
 
-    // Position fish so its LEFT edge stays strictly clear of face & torso for EVERY species (14px minnow to 56px kraken!)
-    const fishObj = g.state === 'CAUGHT'
-      ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
-      : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]);
-    const sprW = fishObj ? (fishObj.w || fishObj.right[0].width || 20) : 20;
-    const gripInset = Math.min(2.5, sprW * 0.16);
-    catchHoldX = holdHandX + sprW * 0.5 - gripInset;
-    catchHoldY = holdHandY + 0.4 + (g.state === 'CAUGHT' ? (initialFlop + flopBurst) * 0.45 : 0);
+    if (holdMode === 'hang') {
+      // Mouth (top of vertical hang sprite) sits right inside the gripping thumb & fingers!
+      // Gentle side-to-side gravity pendulum sway + crisp horizontal tail-wriggle in CAUGHT!
+      const swayX = g.state === 'CAUGHT' ? Math.sin(ct * 3.1) * 0.5 + (initialFlop + flopBurst) * 0.85 : 0;
+      const mouthInset = Math.min(2.8, sprW * 0.14);
+      catchHoldX = holdHandX + 1.6 + swayX;
+      catchHoldY = holdHandY + sprW * 0.5 - mouthInset;
+    } else {
+      // Giant fish rests horizontally ON TOP OF the cradling front hand under its belly/gill-chest!
+      // For colossal tall sprites (Kraken 56x30), shift forward slightly so head/eye stay 100% clear!
+      const isColossalTall = sprH > 20;
+      catchHoldX = isColossalTall
+        ? holdHandX + sprW * 0.27
+        : holdHandX + sprW * 0.14;
+      const minClearY = headY + 3.6 + sprH * 0.5; // strictly below chin (headY + 2) & eye!
+      const cradleY = holdHandY - sprH * 0.26;
+      catchHoldY = isColossalTall
+        ? Math.max(minClearY, holdHandY + 6.5)
+        : Math.min(groundY - sprH * 0.5 - 1, Math.max(minClearY, cradleY));
+      if (g.state === 'CAUGHT') catchHoldY += (initialFlop + flopBurst) * 0.4;
+    }
 
     // Back hand resting position behind the rear shoulder (cozy ~5.0px reach from backShoulder!)
     const rodRestX = shoulderX - 3.6;
@@ -332,6 +365,11 @@ export function computeAnglerRig(g) {
     reelY,
     catchHoldX,
     catchHoldY,
+    holdMode: (g.state === 'CAUGHT' || g.state === 'LANDING')
+      ? (((g.state === 'CAUGHT'
+          ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
+          : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]))?.w || 20) <= 25 ? 'hang' : 'cradle')
+      : null,
     twoHandCatch,
     tuck,
     rodHandX,
@@ -630,10 +668,14 @@ export function renderArticulatedAngler(g, ctx) {
     px(ctx, rig.reelX + 1, rig.reelY + 1, '#facc15', 1, 1);
   }
 
-  // 9. Celebrated caught fish held cleanly OUT IN FRONT of the outstretched hand (100% crisp un-rotated pixels, 0.00px continuity!)
+  // 9. Realistic caught fish hold:
+  //    - 'hang'   (<=25px): Vertical MOUTH/LIP hold using lossless 90° hang frames (gravity down, thumb over lip!)
+  //    - 'cradle' (> 25px): Horizontal BELLY/GILL cradle below chin (cupped palm & fingers wrapping UP onto belly!)
   if (g.state === 'CAUGHT' && g.lastCatchInfo) {
     const spId = g.lastCatchInfo.species.id;
-    const frames = g.sprites.fish[spId].right;
+    const sprSet = g.sprites.fish[spId];
+    const isHang = rig.holdMode === 'hang' && sprSet.hang && sprSet.hang.length > 0;
+    const frames = isHang ? sprSet.hang : sprSet.right;
     const ct = g.catchTime || 0;
     // Lively wet tail-twitch bursts right after catch + periodic natural wriggles!
     const burstPhase = (ct + 0.6) % 2.3;
@@ -644,8 +686,16 @@ export function renderArticulatedAngler(g, ctx) {
     const fy = Math.round(rig.catchHoldY - fSpr.height / 2);
     ctx.drawImage(fSpr, fx, fy);
 
-    // Clean foreground gripping fingers (front hand) wrapping neatly over the fish's tail-stem
-    px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
-    px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1);
+    if (isHang) {
+      // Foreground thumb & forefinger gripping cleanly around the fish's MOUTH / LOWER LIP!
+      px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
+      px(ctx, rig.reelX + 1, rig.reelY + 1, '#f0b58b', 2, 1);
+      px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 1, 1);
+    } else {
+      // Foreground cupped palm & fingers cradling cleanly UNDERNEATH the giant fish's belly/gill-chest!
+      px(ctx, rig.reelX, rig.reelY - 1, '#ffe0c4', 2, 1); // fingers curling up onto lower flank
+      px(ctx, rig.reelX - 1, rig.reelY, '#f0b58b', 3, 1); // supporting palm underneath belly
+      px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1); // shaded underside of hand
+    }
   }
 }

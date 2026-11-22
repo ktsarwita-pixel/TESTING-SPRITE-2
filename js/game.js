@@ -2275,21 +2275,34 @@ class PierlineGame {
         fy = rig.catchHoldY;
       }
 
-      // Fish faces left (mouth toward angler & rod tip!) during hoist (0..0.54),
-      // then smoothly turns in 3D via crisp horizontal scaleX flip (0.54..0.64) right into proud right-facing trophy pose!
-      const turnP = clamp((t - 0.54) / 0.10, 0, 1);
-      const rawTurnCos = -Math.cos(turnP * Math.PI); // -1 (facing left) -> +1 (facing right)
-      const faceDir = rawTurnCos >= 0 ? 1 : -1;
-      this.landingTurnScaleX = Math.max(0.24, Math.abs(rawTurnCos));
-      if (this.activeFish) {
-        this.activeFish.x = fx;
-        this.activeFish.y = fy;
-        this.activeFish.dir = faceDir;
+      const isHang = rig.holdMode === 'hang';
+      if (isHang) {
+        // Vertical mouth-hold fish flies head-first (mouth toward angler) straight into the hand,
+        // then swings cleanly into lossless 90° vertical hang right upon catch (t >= 0.62)!
+        this.landingTurnScaleX = 1;
+        if (this.activeFish) {
+          this.activeFish.x = fx;
+          this.activeFish.y = fy;
+          this.activeFish.dir = -1;
+        }
+        // Hook stays locked to fish's actual MOUTH (left tip while flying, top mouth once hanging vertically!)
+        this.hookX = t >= 0.62 ? fx : fx - (sprW * 0.42);
+        this.hookY = t >= 0.62 ? (fy - sprW * 0.42) : (fy + 0.8);
+      } else {
+        // Large/Giant fish flies head-first (0..0.54), then smoothly turns via crisp 16-bit scaleX flip (0.54..0.64)
+        // straight into the angler's underhand BELLY/GILL cradle!
+        const turnP = clamp((t - 0.54) / 0.10, 0, 1);
+        const rawTurnCos = -Math.cos(turnP * Math.PI); // -1 (facing left) -> +1 (facing right)
+        const faceDir = rawTurnCos >= 0 ? 1 : -1;
+        this.landingTurnScaleX = Math.max(0.24, Math.abs(rawTurnCos));
+        if (this.activeFish) {
+          this.activeFish.x = fx;
+          this.activeFish.y = fy;
+          this.activeFish.dir = faceDir;
+        }
+        this.hookX = fx + rawTurnCos * (sprW * 0.42);
+        this.hookY = fy + 0.8;
       }
-
-      // Fishing line hooks the fish's actual MOUTH tip (never spearing its belly center!)
-      this.hookX = fx + rawTurnCos * (sprW * 0.42);
-      this.hookY = fy + 0.8;
 
       // Realistic elastic rod-tip bend under heave (0..0.36) -> damped elastic whip rebound upon water breakout!
       const targetFlex = t < 0.36

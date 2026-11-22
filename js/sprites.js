@@ -252,12 +252,12 @@ const BASE_PROP_SPRITES = {
 export const PROP_SPRITES = { ...BASE_PROP_SPRITES, ...MAP_PROP_SPRITES };
 
 function makeCanvasFromRows(rows, options = {}) {
-  const { flipX = false, silhouetteColor = null } = options;
+  const { flipX = false, rotateHang = false, silhouetteColor = null } = options;
   const h = rows.length;
   const w = Math.max(...rows.map((r) => r.length));
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
+  c.width = rotateHang ? h : w;
+  c.height = rotateHang ? w : h;
   const ctx = c.getContext('2d');
   for (let y = 0; y < h; y++) {
     const row = rows[y];
@@ -266,8 +266,15 @@ function makeCanvasFromRows(rows, options = {}) {
       const color = PALETTE[ch];
       if (!color) continue;
       ctx.fillStyle = silhouetteColor || color;
-      const dx = flipX ? w - 1 - x : x;
-      ctx.fillRect(dx, y, 1, 1);
+      if (rotateHang) {
+        // Exact lossless 90° pixel transpose: MOUTH (x=w-1) at TOP (dy=0), TAIL (x=0) hanging DOWN, dorsal/eye facing outward RIGHT!
+        const dx = h - 1 - y;
+        const dy = w - 1 - x;
+        ctx.fillRect(dx, dy, 1, 1);
+      } else {
+        const dx = flipX ? w - 1 - x : x;
+        ctx.fillRect(dx, y, 1, 1);
+      }
     }
   }
   return c;
@@ -293,6 +300,7 @@ export function buildSpriteCache() {
     cache.fish[id] = {
       right: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false })),
       left: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true })),
+      hang: frames.map((rows) => makeCanvasFromRows(rows, { rotateHang: true })),
       silRight: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false, silhouetteColor: '#0e243d' })),
       silLeft: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true, silhouetteColor: '#0e243d' })),
       logSil: makeCanvasFromRows(frames[0], { flipX: false, silhouetteColor: '#1e293b' }),

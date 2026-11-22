@@ -1247,34 +1247,51 @@ function renderLandingFishForeground(g, ctx) {
   const f = g.activeFish;
   const sprSet = g.sprites.fish[f.species.id];
   if (!sprSet) return;
+  const t = g.landingT || 0;
+  const rig = computeAnglerRig(g);
+  const isHangCaught = t >= 0.62 && rig.holdMode === 'hang' && sprSet.hang && sprSet.hang.length > 0;
   const dir = f.dir >= 0 ? 1 : -1;
-  const animHz = (g.landingT || 0) < 0.62 ? 15 : 12.5;
-  const frames = dir >= 0 ? sprSet.right : sprSet.left;
+  const animHz = t < 0.62 ? 15 : 12.5;
+  const frames = isHangCaught ? sprSet.hang : (dir >= 0 ? sprSet.right : sprSet.left);
   const frame = Math.floor(g.time * animHz) % frames.length;
   const img = frames[frame];
-  const sx = clamp(g.landingTurnScaleX ?? 1, 0.24, 1);
+  const imgW = img.width || (isHangCaught ? sprSet.h : sprSet.w);
+  const imgH = img.height || (isHangCaught ? sprSet.w : sprSet.h);
+
+  const sx = isHangCaught ? 1 : clamp(g.landingTurnScaleX ?? 1, 0.24, 1);
   if (sx < 0.99) {
-    // Crisp 16-bit horizontal catch-turn flip (zero rotation tearing — keeps every scanline razor-sharp!)
-    const drawW = Math.max(4, Math.round(sprSet.w * sx));
+    const drawW = Math.max(4, Math.round(imgW * sx));
     const dx = Math.round(f.x - drawW / 2);
-    const dy = Math.round(f.y - sprSet.h / 2);
-    ctx.drawImage(img, dx, dy, drawW, sprSet.h);
+    const dy = Math.round(f.y - imgH / 2);
+    ctx.drawImage(img, dx, dy, drawW, imgH);
   } else {
-    const dx = Math.round(f.x - sprSet.w / 2);
-    const dy = Math.round(f.y - sprSet.h / 2);
+    const dx = Math.round(f.x - imgW / 2);
+    const dy = Math.round(f.y - imgH / 2);
     ctx.drawImage(img, dx, dy);
-    if (f.species.id === 'angler') {
+    if (!isHangCaught && f.species.id === 'angler') {
       renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, dir, frame, g.time, f.phase, 0.5, 0.4);
     }
   }
 
-  // Once the angler catches the fish (t >= 0.62), draw crisp foreground gripping fingers over the grip point
-  if ((g.landingT || 0) >= 0.62) {
-    const rig = computeAnglerRig(g);
-    ctx.fillStyle = '#ffe0c4';
-    ctx.fillRect(Math.round(rig.reelX), Math.round(rig.reelY), 2, 1);
-    ctx.fillStyle = '#c2815d';
-    ctx.fillRect(Math.round(rig.reelX), Math.round(rig.reelY + 1), 2, 1);
+  // Once caught (t >= 0.62), draw realistic foreground gripping fingers (mouth-lip grip OR cupped belly cradle!)
+  if (t >= 0.62) {
+    const rx = Math.round(rig.reelX);
+    const ry = Math.round(rig.reelY);
+    if (isHangCaught) {
+      ctx.fillStyle = '#ffe0c4';
+      ctx.fillRect(rx, ry, 2, 1);
+      ctx.fillStyle = '#f0b58b';
+      ctx.fillRect(rx + 1, ry + 1, 2, 1);
+      ctx.fillStyle = '#c2815d';
+      ctx.fillRect(rx, ry + 1, 1, 1);
+    } else {
+      ctx.fillStyle = '#ffe0c4';
+      ctx.fillRect(rx, ry - 1, 2, 1);
+      ctx.fillStyle = '#f0b58b';
+      ctx.fillRect(rx - 1, ry, 3, 1);
+      ctx.fillStyle = '#c2815d';
+      ctx.fillRect(rx, ry + 1, 2, 1);
+    }
   }
 }
 

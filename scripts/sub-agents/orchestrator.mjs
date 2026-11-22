@@ -396,7 +396,7 @@ async function runFaceEyeQA() {
       save: { upgrades: { rod: 3 } },
       activeFish: { species: { id: 'leviathan' } },
       lastCatchInfo: { species: { id: 'leviathan' } },
-      sprites: { fish: { leviathan: { w: sprW, h: sprH, right: Array(4).fill({ id: 'leviathan', width: sprW, height: sprH }) } } },
+      sprites: { fish: { leviathan: { w: sprW, h: sprH, right: Array(4).fill({ id: 'leviathan', width: sprW, height: sprH }), hang: Array(4).fill({ id: 'leviathan', width: sprH, height: sprW }) } } },
     };
     renderArticulatedAngler(g, ctx);
     const rig = computeAnglerRig(g);
@@ -495,25 +495,64 @@ async function runSilhouetteQA() {
   if (!/flopBurst|wriggle|tailTwitch/.test(angSrc)) {
     issues.push('robotic CAUGHT fish motion: missing lively intermittent flop/tail-twitch bursts');
   }
-  // 3. Check front hand actually touches fish body (zero floating gap between hand & held fish)
-  for (const id of ['minnow', 'snapper', 'leviathan', 'krakentitan']) {
-    const sprW = FISH_SPRITES[id][0][0].length;
+  // 3. Audit ALL 26 species: STRICTLY FORBID tail-tip holding! Verify realistic MOUTH/LIP hang OR BELLY/GILL cradle + zero face overlap!
+  const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
+  for (const sp of FISH_SPECIES) {
+    const id = sp.id;
+    const rows = FISH_SPRITES[id][0];
+    const sprW = rows[0].length;
+    const sprH = rows.length;
     const g = {
       anglerX: 24, pierY: 62, time: 2.2, state: 'CAUGHT',
       animLean: 0, animSquat: 0.2, animStance: 0.5, rodAngle: -2.28,
-      landingT: 1, landingWeightFactor: 0.5, catchTime: 0.5,
+      landingT: 1, landingWeightFactor: sprW > 25 ? 0.75 : 0.25, catchTime: 0.5,
       lastCatchInfo: { species: { id } },
-      sprites: { fish: { [id]: { w: sprW, h: 16, right: Array(4).fill({ id, width: sprW, height: 16 }) } } },
+      sprites: {
+        fish: {
+          [id]: {
+            w: sprW, h: sprH,
+            right: Array(4).fill({ id, width: sprW, height: sprH }),
+            hang: Array(4).fill({ id, width: sprH, height: sprW }),
+          },
+        },
+      },
     };
     const rig = computeAnglerRig(g);
-    const fishLeft = rig.catchHoldX - sprW / 2;
-    const fishRight = rig.catchHoldX + sprW / 2;
-    if (rig.reelX < fishLeft - 0.5 || rig.reelX > fishRight) {
-      issues.push(`${id}: front hand (${rig.reelX.toFixed(1)}) disconnected from fish [${fishLeft.toFixed(1)}..${fishRight.toFixed(1)}]`);
-    }
-    const faceRight = rig.headX + 3;
-    if (fishLeft < faceRight) {
-      issues.push(`${id}: fish left edge (${fishLeft.toFixed(1)}) overlaps face right edge (${faceRight.toFixed(1)})`);
+    if (sprW <= 25) {
+      if (rig.holdMode !== 'hang') issues.push(`${id}: small/med fish should use vertical mouth-lip hold ('hang')`);
+      const topMouthY = rig.catchHoldY - sprW / 2;
+      const botTailY = rig.catchHoldY + sprW / 2;
+      if (Math.abs(rig.reelY - topMouthY) > 4.2) {
+        issues.push(`${id}: hand (${rig.reelY.toFixed(1)}) not gripping top mouth (${topMouthY.toFixed(1)})`);
+      }
+      if (botTailY > 63.5) {
+        issues.push(`${id}: hanging tail (${botTailY.toFixed(1)}) clips into pier (62)`);
+      }
+    } else {
+      if (rig.holdMode !== 'cradle') issues.push(`${id}: large fish should use belly/gill cradle ('cradle')`);
+      const fishLeft = rig.catchHoldX - sprW / 2;
+      const fishTop = rig.catchHoldY - sprH / 2;
+      const gripFrac = (rig.reelX - fishLeft) / sprW;
+      // Hand MUST support mid-body/belly (>=22% from tail tip), NEVER pinch the tail tip!
+      if (gripFrac < 0.20 || gripFrac > 0.78) {
+        issues.push(`${id}: unrealistic tail/tip pinch (gripFrac=${gripFrac.toFixed(2)}, must be 0.20..0.78 belly/body)`);
+      }
+      // Pixel-exact face & eye clearance: verify ZERO opaque fish pixels overlap the angler's face/eye region!
+      const hx = Math.round(rig.headX), hy = Math.round(rig.headY);
+      const fx0 = Math.round(fishLeft), fy0 = Math.round(fishTop);
+      let faceOverlapPx = 0;
+      for (let ry = 0; ry < sprH; ry++) {
+        const wy = fy0 + ry;
+        if (wy < hy - 2 || wy > hy + 1) continue;
+        for (let rx = 0; rx < sprW; rx++) {
+          if (rows[ry][rx] === '.') continue;
+          const wx = fx0 + rx;
+          if (wx >= hx - 1 && wx <= hx + 3) faceOverlapPx++;
+        }
+      }
+      if (faceOverlapPx > 0) {
+        issues.push(`${id}: ${faceOverlapPx} opaque fish pixels overlap angler face/eye!`);
+      }
     }
   }
   // 4. Check rod passes behind torso/head early enough (tuck > 0.08 or rodAngle < -1.32)
