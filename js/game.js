@@ -2353,17 +2353,18 @@ class PierlineGame {
         : Math.exp(-(t - 0.22) * 6.5) * Math.cos((t - 0.22) * 24) * (0.34 + wf * 0.16);
       this.rodFlex = lerp(this.rodFlex, targetFlex, 1 - Math.exp(-15 * dt));
 
-      // Streaming glistening water droplets & starlight sparks trailing off the flying spinning fish!
-      if (t < 0.72 && Math.random() < dt * (34 + wf * 18)) {
+      // Streaming glistening water droplets + supersonic wind-vortex spray trailing off the flying fish!
+      if (t < 0.72 && Math.random() < dt * (44 + wf * 20)) {
+        const isWindPuff = t >= 0.18 && t <= 0.55 && Math.random() < 0.42;
         this.particles.push({
-          x: fx + rand(-land.w * 0.3, land.w * 0.3),
-          y: fy + rand(-land.h * 0.25, land.h * 0.35),
-          vx: rand(-12, 18),
-          vy: rand(-6, 18),
-          g: 112,
-          life: rand(0.20, 0.46),
-          size: 1,
-          color: Math.random() < 0.65 ? '#e0f2fe' : '#7dd3fc',
+          x: fx + rand(-land.w * 0.32, land.w * 0.32),
+          y: fy + rand(-land.h * 0.28, land.h * 0.32),
+          vx: isWindPuff ? rand(12, 34) : rand(-14, 18),
+          vy: isWindPuff ? rand(-10, 10) : rand(-8, 18),
+          g: isWindPuff ? 18 : 114,
+          life: rand(0.20, 0.48),
+          size: isWindPuff && Math.random() > 0.55 ? 2 : 1,
+          color: isWindPuff ? '#ffffff' : (Math.random() < 0.65 ? '#e0f2fe' : '#7dd3fc'),
         });
       }
       if (t >= 1) this.completeCatch();
@@ -2371,11 +2372,11 @@ class PierlineGame {
       const prevCt = this.catchTime;
       this.catchTime += dt;
       this.rodFlex = lerp(this.rodFlex, 0, 1 - Math.exp(-6 * dt));
-      // Spray tiny wet droplets off the back of the dock whenever the flopping fish slaps down!
-      const cycle = 1.28;
+      // Spray wet droplets & tiny plank dust off the back of the dock whenever the flopping fish slaps back down!
+      const cycle = 1.55;
       const prevLocal = prevCt % cycle;
       const curLocal = this.catchTime % cycle;
-      if (this.catchTime > 0.2 && ((prevLocal < 0.54 && curLocal >= 0.54) || (prevLocal < 0.84 && curLocal >= 0.84))) {
+      if (this.catchTime > 0.35 && (prevLocal < 1.10 && curLocal >= 1.10)) {
         const rig = computeAnglerRig(this);
         const land = computeBackDockLanding(this, rig);
         for (let i = 0; i < 6; i++) {

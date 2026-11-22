@@ -302,6 +302,23 @@ export function buildSpriteCache() {
   }
 
   for (const [id, frames] of Object.entries(FISH_SPRITES)) {
+    const h = frames[0].length;
+    const w = Math.max(...frames[0].map((r) => r.length));
+    const topPads = [];
+    const botPads = [];
+    for (const rows of frames) {
+      let minY = h - 1, maxY = 0;
+      for (let y = 0; y < rows.length; y++) {
+        for (let x = 0; x < rows[y].length; x++) {
+          if (PALETTE[rows[y][x]]) {
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      topPads.push(minY);
+      botPads.push((h - 1) - maxY);
+    }
     cache.fish[id] = {
       right: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false })),
       left: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true })),
@@ -311,8 +328,12 @@ export function buildSpriteCache() {
       silRight: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false, silhouetteColor: '#0e243d' })),
       silLeft: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true, silhouetteColor: '#0e243d' })),
       logSil: makeCanvasFromRows(frames[0], { flipX: false, silhouetteColor: '#1e293b' }),
-      w: Math.max(...frames[0].map((r) => r.length)),
-      h: frames[0].length,
+      w,
+      h,
+      topPad: topPads[0],
+      botPad: botPads[0],
+      topPads,
+      botPads,
     };
   }
 

@@ -56,6 +56,18 @@ export function buildGameFrameState(fishId, st) {
   const wf = clamp(Math.log10(1 + avgW) / 2.15, 0.08, 1.0);
   const sprW = FISH_SPRITES[fishId][0][0].length;
   const sprH = FISH_SPRITES[fishId][0].length;
+  let minOpaqueY = sprH - 1, maxOpaqueY = 0;
+  const frameRows0 = FISH_SPRITES[fishId][0];
+  for (let ry = 0; ry < sprH; ry++) {
+    for (let rx = 0; rx < sprW; rx++) {
+      if (frameRows0[ry][rx] !== '.') {
+        if (ry < minOpaqueY) minOpaqueY = ry;
+        if (ry > maxOpaqueY) maxOpaqueY = ry;
+      }
+    }
+  }
+  const topPad = minOpaqueY;
+  const botPad = (sprH - 1) - maxOpaqueY;
   const isCaught = st >= 1.0;
   const t = clamp(st, 0, 1);
 
@@ -105,7 +117,7 @@ export function buildGameFrameState(fishId, st) {
     state: isCaught ? 'CAUGHT' : 'LANDING',
     animLean: lean, animSquat: squat, animStance: stance,
     rodAngle, rodFlex, landingT: t, landingWeightFactor: wf,
-    catchTime: isCaught ? 0.32 : 0,
+    catchTime: isCaught ? 0.05 : 0,
     landingInitGripDX: 5.2, landingInitGripDY: 1.2,
     landingInitReelDX: 3.1, landingInitReelDY: 2.3,
     landingStartX: pierEndX + Math.max(12, sprW * 0.5 + 4),
@@ -116,7 +128,7 @@ export function buildGameFrameState(fishId, st) {
     sprites: {
       fish: {
         [fishId]: {
-          w: sprW, h: sprH,
+          w: sprW, h: sprH, topPad, botPad,
           right: Array(4).fill({ id: fishId, mode: 'right', width: sprW, height: sprH }),
           left: Array(4).fill({ id: fishId, mode: 'left', width: sprW, height: sprH }),
           hang: Array(4).fill({ id: fishId, mode: 'hang', width: sprH, height: sprW }),
@@ -140,8 +152,8 @@ export function rasterizeFrame(fishId, st) {
   const anglerHeadPx = new Set();
   const fishPx = new Set();
 
-  // Fill wooden pier planks (x: 0..pierEndX, y: pierY..pierY+4)
-  for (let py = g.pierY; py <= g.pierY + 4; py++) {
+  // Fill wooden pier interior planks (x: 0..pierEndX, y: pierY+1..pierY+4; row pierY is walkable surface!)
+  for (let py = g.pierY + 1; py <= g.pierY + 4; py++) {
     for (let px = 0; px <= g.pierEndX; px++) {
       pierPx.add(`${px},${py}`);
     }
@@ -229,36 +241,84 @@ export function rasterizeFrame(fishId, st) {
     }
   }
 
-  // Impact comic starburst on dock slam!
+  // Sonic air-break shock ring + curved slipstream wind ribbons + hat gust!
+  if (land.sonicRing) {
+    const sr = land.sonicRing;
+    const sp2 = clamp(sr.progress, 0, 1);
+    const rx = lerp(3, 12, sp2), ry = lerp(6, 17, sp2);
+    for (let i = 0; i < 20; i++) {
+      const a = (i / 20) * Math.PI * 2;
+      extraOps.push({ op: 'rect', x: sr.x + Math.cos(a) * rx, y: sr.y + Math.sin(a) * ry, w: 1, h: 1, c: i % 2 === 0 ? '#ffffff' : '#bae6fd', a: (1 - sp2) * 0.9 });
+    }
+  }
+  if (land.windTrail && land.windTrail.length >= 4) {
+    const offs = [[-5, '#ffffff', 0.82], [0, '#bae6fd', 0.72], [5, '#38bdf8', 0.58]];
+    for (const [dy, col, a0] of offs) {
+      for (let i = 0; i < land.windTrail.length - 1; i++) {
+        const ptA = land.windTrail[i], ptB = land.windTrail[i + 1];
+        extraOps.push({ op: 'line', x0: ptA.x, y0: ptA.y + dy, x1: ptB.x, y1: ptB.y + dy, c: col, a: (1 - ptA.u) * a0 });
+      }
+    }
+  }
+  if (land.hatGust > 0.08) {
+    const hgx = Math.round(rig.headX), hgy = Math.round(rig.headY - 5 - (rig.hatPopY || 0));
+    for (let i = 0; i < 3; i++) {
+      extraOps.push({ op: 'line', x0: hgx + 7 - i * 2, y0: hgy - 2 + i * 3, x1: hgx - 4 - i * 2, y1: hgy - 1 + i * 3, c: i === 0 ? '#ffffff' : '#bae6fd', a: land.hatGust * 0.8 });
+    }
+  }
+
+  // Insane dock slam FX: billowing dust clouds + 10-ray crunch starburst + water crown!
   if (land.impactFlash) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x), iy = Math.round(imp.y);
-    const rad = Math.round(lerp(3, imp.big ? 20 : 10, p));
-    extraOps.push({ op: 'rect', x: ix - rad, y: iy, w: 3, h: 1, c: '#fef08a', a: clamp(1 - p, 0, 0.9) });
-    extraOps.push({ op: 'rect', x: ix + rad - 2, y: iy, w: 3, h: 1, c: '#fef08a', a: clamp(1 - p, 0, 0.9) });
-    if (p < 0.65) {
-      const rl = Math.round(lerp(4, 15, p));
-      extraOps.push({ op: 'line', x0: ix - 2, y0: iy, x1: ix - rl, y1: iy - Math.round(rl * 0.65), c: '#fde047', a: 0.9 });
-      extraOps.push({ op: 'line', x0: ix + 2, y0: iy, x1: ix + rl, y1: iy - Math.round(rl * 0.65), c: '#fde047', a: 0.9 });
-      extraOps.push({ op: 'line', x0: ix, y0: iy - 1, x1: ix, y1: iy - rl, c: '#ffffff', a: 0.95 });
+    const wf = imp.wf ?? 0.35;
+    const maxR = imp.big ? (17 + wf * 15) : (10 + wf * 6);
+    const rad = Math.round(lerp(3, maxR, Math.pow(p, 0.7)));
+    extraOps.push({ op: 'rect', x: ix - rad, y: iy - 1, w: 4, h: 1, c: '#7dd3fc', a: clamp(1 - p, 0, 0.9) });
+    extraOps.push({ op: 'rect', x: ix + rad - 3, y: iy - 1, w: 4, h: 1, c: '#7dd3fc', a: clamp(1 - p, 0, 0.9) });
+    // Billowing pixel dust puffs left & right
+    const spread = lerp(3, maxR * 0.92, Math.pow(p, 0.65));
+    const lift = Math.sin(p * Math.PI * 0.85) * (imp.big ? 4.5 + wf * 2.5 : 2.5);
+    const pr = Math.max(1, Math.round((imp.big ? 3.8 + wf * 1.8 : 2.4) * (0.55 + 0.65 * Math.sin(p * Math.PI * 0.78))));
+    for (const side of [-1, 1]) {
+      const bx = ix + side * spread, by = iy - 1 - lift * 0.45;
+      for (const [ox, oy, lr] of [[0,0,pr*0.9],[-pr*0.6,pr*0.2,pr*0.62],[pr*0.6,pr*0.2,pr*0.62],[pr*0.15,-pr*0.4,pr*0.52]]) {
+        const cx = Math.round(bx + ox), cy = Math.round(by + oy), rr = Math.max(1, Math.round(lr));
+        for (let dy = -rr; dy <= rr; dy++) {
+          if (cy + dy > iy) continue;
+          const spn = Math.floor(Math.sqrt(Math.max(0, rr * rr - dy * dy)));
+          extraOps.push({ op: 'rect', x: cx - spn, y: cy + dy, w: spn * 2 + 1, h: 1, c: dy < -rr * 0.2 ? '#fef9ef' : dy > rr * 0.35 ? '#947c62' : '#e2d5c3', a: clamp(1 - p * 0.8, 0.1, 0.88) });
+        }
+      }
+    }
+    if (p < 0.68) {
+      const sp3 = p / 0.68;
+      const rl = Math.round(lerp(4, maxR * 0.92, Math.pow(sp3, 0.7)));
+      for (const [rx, ry, col] of [[-1,-0.18,'#ffffff'],[1,-0.18,'#ffffff'],[-0.88,-0.52,'#fde047'],[0.88,-0.52,'#fde047'],[-0.56,-0.84,'#fb923c'],[0.56,-0.84,'#fb923c'],[0,-1.05,'#ffffff']]) {
+        extraOps.push({ op: 'line', x0: ix + Math.round(rx * 2), y0: iy - 1 + Math.round(ry * 2), x1: ix + Math.round(rx * rl), y1: iy - 1 + Math.round(ry * rl), c: col, a: clamp(1 - sp3 * 0.85, 0.1, 1) });
+      }
     }
   }
 
-  // Main fish sprite
+  // Main fish sprite (EXACT FLUSH GROUNDING on pierY!)
   const grid = getFishGrid(fishId, land.mode);
   const imgW = grid[0].length;
   const imgH = grid.length;
   const ix = Math.round(land.x - imgW / 2);
   let iy = Math.round(land.y - imgH / 2);
-  if (ix <= g.pierEndX + 1 && iy + imgH > g.pierY) iy = g.pierY - imgH;
+  const maxOpaqueIy = g.pierY + 1 + (land.activePad || 0) - imgH;
+  if (ix <= g.pierEndX + 1 && iy > maxOpaqueIy) iy = maxOpaqueIy;
   extraOps.push({ op: 'img', id: fishId, mode: land.mode, x: ix, y: iy, a: 1 });
 
+  let lowestFishOpaqueY = -999;
   for (let ry = 0; ry < imgH; ry++) {
     for (let rx = 0; rx < imgW; rx++) {
       const ch = grid[ry][rx];
       if (ch === '.') continue;
-      fishPx.add(`${ix + rx},${iy + ry}`);
+      const wy = iy + ry;
+      if (wy > lowestFishOpaqueY) lowestFishOpaqueY = wy;
+      fishPx.add(`${ix + rx},${wy}`);
     }
   }
 
@@ -295,7 +355,7 @@ export function rasterizeFrame(fishId, st) {
   return {
     g, rig, land, angOps, extraOps,
     bodyNoclips, headNoclips, pierNoclips,
-    backDockVisible, fishMinX, fishMaxX,
+    backDockVisible, fishMinX, fishMaxX, lowestFishOpaqueY, groundingGap: g.pierY - lowestFishOpaqueY,
   };
 }
 

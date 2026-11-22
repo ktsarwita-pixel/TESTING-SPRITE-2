@@ -461,6 +461,8 @@ async function runCatchPhysicsQA() {
   if (!renSrc.includes('impactFlash')) issues.push('missing comic impact starburst / shockwave ring on dock slam');
   if (!renSrc.includes('showDizzyStars')) issues.push('missing orbiting dizzy stars over stunned fish on back of dock');
   if (!physSrc.includes('ghosts')) issues.push('missing speed afterimage ghosts during overhead launch');
+  if (!physSrc.includes('windTrail') || !physSrc.includes('sonicRing')) issues.push('missing curved slipstream wind ribbons or Mach sonic ring');
+  if (!renSrc.includes('drawPixelDustPuff')) issues.push('missing billowing pixel dust clouds on dock slam');
 
   const landStart = gameSrc.lastIndexOf("else if (this.state === 'LANDING')");
   const landEnd = gameSrc.indexOf("else if (this.state === 'CAUGHT')", landStart);
@@ -525,6 +527,9 @@ async function runSilhouetteQA() {
     }
     if (!caughtRes.land.showDizzyStars) {
       issues.push(`${sp.id}: missing dizzy stars on back of dock in CAUGHT`);
+    }
+    if (caughtRes.groundingGap !== 0) {
+      issues.push(`${sp.id}: fish floating/sinking on dock in CAUGHT (gap=${caughtRes.groundingGap}px, lowestY=${caughtRes.lowestFishOpaqueY}, pierY=${caughtRes.g.pierY})`);
     }
   }
 

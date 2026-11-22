@@ -1254,7 +1254,52 @@ function getOrientedFishFrame(sprSet, mode, frameIdx) {
   return arr[frameIdx % arr.length];
 }
 
-// Foreground pass for the insane Over-Reel Back-of-Dock Launch (LANDING) AND visible flopping trophy (CAUGHT)!
+// Helper: organic multi-lobe flat-bottomed 16-bit landing dust/mist cloud cluster (SNES/Metal-Slug style!)
+function drawPixelDustPuff(ctx, cx, cy, rad, alpha, warm = false, floorY = 9999) {
+  if (rad < 1 || alpha <= 0.04) return;
+  ctx.save();
+  ctx.globalAlpha = clamp(alpha, 0, 0.92);
+  const hiCol = warm ? '#fef9ef' : '#ffffff';
+  const baseCol = warm ? '#e2d5c3' : '#cbd5e1';
+  const shCol = warm ? '#947c62' : '#64748b';
+  const lobes = [
+    [0, 0, rad * 0.92],
+    [-rad * 0.62, rad * 0.22, rad * 0.65],
+    [rad * 0.62, rad * 0.22, rad * 0.65],
+    [rad * 0.18, -rad * 0.42, rad * 0.56],
+  ];
+  for (const [ox, oy, lr] of lobes) {
+    const rx = Math.round(cx + ox);
+    const ry = Math.round(cy + oy);
+    const rr = Math.max(1, Math.round(lr));
+    for (let dy = -rr; dy <= rr; dy++) {
+      const py = ry + dy;
+      if (py > floorY) continue;
+      const span = Math.floor(Math.sqrt(Math.max(0, rr * rr - dy * dy)));
+      if (span < 0) continue;
+      ctx.fillStyle = dy < -rr * 0.2 ? hiCol : dy > rr * 0.35 ? shCol : baseCol;
+      ctx.fillRect(rx - span, py, span * 2 + 1, 1);
+    }
+  }
+  ctx.restore();
+}
+
+// Helper: crisp elliptical Mach sonic air-break ring
+function drawSonicAirRing(ctx, cx, cy, rx, ry, alpha) {
+  ctx.save();
+  const steps = Math.max(14, Math.round((rx + ry) * 2.4));
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const x = Math.round(cx + Math.cos(a) * rx);
+    const y = Math.round(cy + Math.sin(a) * ry);
+    ctx.globalAlpha = alpha * (i % 2 === 0 ? 0.95 : 0.65);
+    ctx.fillStyle = i % 3 === 0 ? '#ffffff' : '#bae6fd';
+    ctx.fillRect(x, y, 1, 1);
+  }
+  ctx.restore();
+}
+
+// Foreground pass for the insane Over-Reel Back-of-Dock Launch (LANDING) AND visible grounded trophy (CAUGHT)!
 function renderLandingFishForeground(g, ctx) {
   const isLanding = g.state === 'LANDING' && g.activeFish;
   const isCaught = g.state === 'CAUGHT' && g.lastCatchInfo;
@@ -1268,41 +1313,107 @@ function renderLandingFishForeground(g, ctx) {
   const land = computeBackDockLanding(g, rig);
   const t = isLanding ? clamp(g.landingT || 0, 0, 1) : 1;
 
-  // 1. Anime/arcade supersonic launch speedlines streaking across the sky during the mega-yank & flyby!
-  if (isLanding && t >= 0.08 && t <= 0.56) {
+  // 1. INSANE SUPERSONIC WIND FX: Mach sonic ring + curved slipstream wind ribbons + curling wind vortexes + hat gust!
+  if (land.sonicRing) {
+    const sr = land.sonicRing;
+    const sp2 = clamp(sr.progress, 0, 1);
+    drawSonicAirRing(ctx, sr.x, sr.y, lerp(3, 12, sp2), lerp(6, 17, sp2), (1 - sp2) * 0.92);
+    if (sp2 < 0.65) {
+      drawSonicAirRing(ctx, sr.x + 2, sr.y, lerp(2, 7, sp2 / 0.65), lerp(3, 10, sp2 / 0.65), (1 - sp2 / 0.65) * 0.75);
+    }
+  }
+
+  if (land.windTrail && land.windTrail.length >= 4) {
     ctx.save();
-    const intensity = Math.sin(((t - 0.08) / 0.48) * Math.PI);
-    for (let i = 0; i < 6; i++) {
-      const seed = (i * 19 + Math.floor(g.time * 24) * 7) % 100;
-      const sx = Math.round(land.x + 8 + (seed % 26) - i * 4);
-      const sy = Math.round(Math.max(4, land.y - 10 + (i - 2.5) * 6));
-      const len = 8 + (i % 3) * 5;
-      ctx.globalAlpha = clamp(intensity * (0.35 + (i % 2) * 0.25), 0, 0.75);
-      drawPixelLine(ctx, sx, sy, sx + len, sy + Math.round(len * 0.35), i % 2 === 0 ? '#fef9c3' : '#e0f2fe');
+    // 3 parallel sweeping slipstream wind ribbons hugging the fish's exact parabolic launch curve!
+    const offsets = [
+      { dy: -5, col: '#ffffff', a: 0.82 },
+      { dy: 0,  col: '#bae6fd', a: 0.72 },
+      { dy: 5,  col: '#38bdf8', a: 0.58 },
+    ];
+    for (let oi = 0; oi < offsets.length; oi++) {
+      const off = offsets[oi];
+      for (let i = 0; i < land.windTrail.length - 1; i++) {
+        const a = land.windTrail[i];
+        const b = land.windTrail[i + 1];
+        const fade = (1 - a.u) * off.a;
+        if (fade <= 0.06) continue;
+        ctx.globalAlpha = fade;
+        const wave = Math.sin(g.time * 28 + i * 1.3 + oi * 2.1) * 1.4;
+        drawPixelLine(ctx, a.x, a.y + off.dy + wave, b.x, b.y + off.dy - wave * 0.6, off.col);
+      }
+      // Crisp cartoon wind-vortex spiral curl peeling off the tail of the slipstream!
+      const tail = land.windTrail[Math.min(land.windTrail.length - 1, 3 + oi)];
+      if (tail) {
+        const cx = Math.round(tail.x + 2);
+        const cy = Math.round(tail.y + off.dy);
+        ctx.globalAlpha = off.a * 0.78;
+        ctx.fillStyle = off.col;
+        ctx.fillRect(cx, cy, 2, 1);
+        ctx.fillRect(cx + 2, cy - 1, 1, 2);
+        ctx.fillRect(cx + 1, cy - 2, 2, 1);
+      }
     }
     ctx.restore();
   }
 
-  // 2. Shimmering wet puddle & dynamic contact shadow on the wooden back-of-dock planks!
+  // Dramatic overhead hat-gust wind streaks whipping right across the ducking angler's popping straw hat!
+  if (land.hatGust > 0.08) {
+    ctx.save();
+    const hx = Math.round(rig.headX);
+    const hy = Math.round(rig.headY - 5 - (rig.hatPopY || 0));
+    const phaseShift = Math.floor(g.time * 42) % 9;
+    for (let i = 0; i < 3; i++) {
+      const wy = hy - 2 + i * 3;
+      const wx = hx + 9 - phaseShift - i * 3;
+      const len = 8 + (i % 2) * 5;
+      ctx.globalAlpha = clamp(land.hatGust * (0.85 - i * 0.16), 0, 0.85);
+      drawPixelLine(ctx, wx, wy, wx - len, wy + (i === 0 ? -1 : 1), i === 0 ? '#ffffff' : '#bae6fd');
+      // Tiny swirling gust curl beside hat brim
+      ctx.fillStyle = '#e0f2fe';
+      ctx.fillRect(wx - len - 1, wy + (i === 0 ? -2 : 2), 2, 1);
+    }
+    ctx.restore();
+  }
+
+  // Velocity-aligned sky speedlines during turbo yank & launch
+  if (isLanding && t >= 0.06 && t <= 0.54) {
+    ctx.save();
+    const intensity = Math.sin(((t - 0.06) / 0.48) * Math.PI);
+    for (let i = 0; i < 7; i++) {
+      const seed = (i * 23 + Math.floor(g.time * 32) * 11) % 100;
+      const sx = Math.round(land.x + 12 + (seed % 28) - i * 5);
+      const sy = Math.round(Math.max(3, land.y - 11 + (i - 3) * 5));
+      const len = 10 + (i % 3) * 6;
+      const slope = t < 0.22 ? 0.55 : 0.18;
+      ctx.globalAlpha = clamp(intensity * (0.38 + (i % 2) * 0.26), 0, 0.78);
+      drawPixelLine(ctx, sx, sy, sx + len, sy + Math.round(len * slope), i % 2 === 0 ? '#ffffff' : '#bae6fd');
+    }
+    ctx.restore();
+  }
+
+  // 2. Shimmering wet puddle & crisp grounded contact shadow on the wooden back-of-dock planks!
   if (land.showPuddle) {
     ctx.save();
-    const pudW = Math.min(Math.round(sprSet.w * 0.88), Math.max(12, Math.round(g.pierEndX * 0.6)));
+    const pudW = Math.min(Math.round(sprSet.w * 0.92), Math.max(14, Math.round(g.pierEndX * 0.64)));
     const pudX = Math.max(1, Math.round(land.restX - pudW * 0.5));
-    // Wet glistening sheen across the wooden planks
-    ctx.globalAlpha = 0.42;
+    // Wet glistening water sheen across the top plank surface
+    ctx.globalAlpha = 0.44;
     ctx.fillStyle = '#38bdf8';
     ctx.fillRect(pudX, g.pierY, pudW, 1);
-    ctx.globalAlpha = 0.28;
+    ctx.globalAlpha = 0.30;
     ctx.fillStyle = '#bae6fd';
     ctx.fillRect(pudX + 2, g.pierY + 1, Math.max(4, pudW - 4), 1);
 
-    // Dynamic fish shadow shrinking as the fish hops/bounces off the dock!
+    // Dynamic fish contact shadow sitting tightly on pierY..pierY+1 beneath the belly!
     const heightOffDeck = Math.max(0, land.restY - land.y);
-    const shScale = clamp(1 - heightOffDeck / 26, 0.32, 1);
-    const shW = Math.max(6, Math.round(land.w * 0.72 * shScale));
-    ctx.globalAlpha = 0.45 * shScale;
-    ctx.fillStyle = '#0f172a';
+    const shScale = clamp(1 - heightOffDeck / 24, 0.34, 1);
+    const shW = Math.max(8, Math.round(land.w * 0.78 * shScale));
+    ctx.globalAlpha = 0.54 * shScale;
+    ctx.fillStyle = '#120a05';
     ctx.fillRect(Math.round(land.x - shW * 0.5), g.pierY, shW, 1);
+    ctx.globalAlpha = 0.28 * shScale;
+    ctx.fillRect(Math.round(land.x - shW * 0.42), g.pierY + 1, Math.max(4, Math.round(shW * 0.84)), 1);
     ctx.restore();
   }
 
@@ -1321,44 +1432,92 @@ function renderLandingFishForeground(g, ctx) {
     }
   }
 
-  // 4. 8-ray comic pixel IMPACT STARBURST + expanding shockwave ring on the dock planks!
+  // 4. INSANE DOCK LANDING FX: Hit-flash core + 10-ray crunch starburst + billowing pixel dust clouds + water crown + plank shockwave!
   if (land.impactFlash) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x);
     const iy = Math.round(imp.y);
-    const maxR = imp.big ? (14 + (g.landingWeightFactor || 0.35) * 14) : 9;
-    const rad = Math.round(lerp(3, maxR, p));
+    const wf = imp.wf ?? (g.landingWeightFactor || 0.35);
+    const maxR = imp.big ? (17 + wf * 15) : (10 + wf * 6);
+    const rad = Math.round(lerp(3, maxR, Math.pow(p, 0.7)));
+
     ctx.save();
-    // Expanding horizontal shockwave dust ring along the wooden dock!
-    ctx.globalAlpha = clamp(1 - p, 0, 0.95);
-    ctx.fillStyle = imp.big && p < 0.35 ? '#ffffff' : '#fef08a';
-    ctx.fillRect(ix - rad, iy, 3, 1);
-    ctx.fillRect(ix + rad - 2, iy, 3, 1);
-    if (p < 0.65) {
-      // Crisp 6-ray comic starburst exploding upward from slam point!
-      const rayL = Math.round(lerp(4, maxR * 0.85, p));
-      const rayCol = p < 0.28 ? '#ffffff' : '#fde047';
-      drawPixelLine(ctx, ix - 2, iy, ix - rayL, iy - Math.round(rayL * 0.65), rayCol);
-      drawPixelLine(ctx, ix + 2, iy, ix + rayL, iy - Math.round(rayL * 0.65), rayCol);
-      drawPixelLine(ctx, ix, iy - 1, ix, iy - Math.round(rayL * 0.85), '#ffffff');
-      drawPixelLine(ctx, ix - 1, iy, ix - Math.round(rayL * 0.55), iy - rayL, '#7dd3fc');
-      drawPixelLine(ctx, ix + 1, iy, ix + Math.round(rayL * 0.55), iy - rayL, '#7dd3fc');
+    // (a) Plank impact flash bar racing across the slammed dock boards!
+    if (p < 0.45) {
+      const flashW = Math.round(lerp(8, maxR * 1.4, p / 0.45));
+      ctx.globalAlpha = (1 - p / 0.45) * 0.88;
+      ctx.fillStyle = p < 0.18 ? '#ffffff' : '#fef08a';
+      ctx.fillRect(Math.max(1, ix - Math.floor(flashW / 2)), iy, flashW, 1);
+    }
+
+    // (b) Dual expanding ground shockwave ripples + water crown splash!
+    ctx.globalAlpha = clamp((1 - p) * 0.95, 0, 0.95);
+    ctx.fillStyle = p < 0.30 ? '#ffffff' : '#7dd3fc';
+    ctx.fillRect(ix - rad, iy - 1, 4, 1);
+    ctx.fillRect(ix + rad - 3, iy - 1, 4, 1);
+    ctx.fillStyle = '#e0f2fe';
+    ctx.fillRect(ix - rad - 1, iy - 2 - Math.round(Math.sin(p * Math.PI) * 3), 2, 1);
+    ctx.fillRect(ix + rad, iy - 2 - Math.round(Math.sin(p * Math.PI) * 3), 2, 1);
+
+    // (c) Billowing sculpted pixel-art dust & mist clouds rolling left & right along the dock!
+    const cloudFade = clamp(1 - Math.max(0, p - 0.18) / 0.82, 0, 1);
+    const spread = lerp(3, maxR * 0.92, Math.pow(p, 0.65));
+    const lift = Math.sin(p * Math.PI * 0.85) * (imp.big ? 4.5 + wf * 2.5 : 2.5);
+    const mainR = (imp.big ? 3.8 + wf * 1.8 : 2.4) * (0.55 + 0.65 * Math.sin(p * Math.PI * 0.78));
+    drawPixelDustPuff(ctx, ix - spread, iy - 1 - lift * 0.45, mainR, cloudFade * 0.88, true, iy);
+    drawPixelDustPuff(ctx, ix + spread, iy - 1 - lift * 0.45, mainR, cloudFade * 0.88, true, iy);
+    drawPixelDustPuff(ctx, ix - spread * 0.55, iy - 1 - lift * 0.85, mainR * 0.74, cloudFade * 0.72, false, iy);
+    drawPixelDustPuff(ctx, ix + spread * 0.55, iy - 1 - lift * 0.85, mainR * 0.74, cloudFade * 0.72, false, iy);
+
+    // (d) 10-ray staggered comic CRUNCH STARBURST erupting out of the dock slam!
+    if (p < 0.68) {
+      const sp3 = p / 0.68;
+      const rayL = Math.round(lerp(4, maxR * 0.92, Math.pow(sp3, 0.7)));
+      const rays = [
+        [-1.0, -0.18, '#ffffff'], [1.0, -0.18, '#ffffff'],
+        [-0.88, -0.52, '#fde047'], [0.88, -0.52, '#fde047'],
+        [-0.56, -0.84, '#fb923c'], [0.56, -0.84, '#fb923c'],
+        [-0.26, -0.98, '#7dd3fc'], [0.26, -0.98, '#7dd3fc'],
+        [0, -1.05, '#ffffff'],
+      ];
+      ctx.globalAlpha = clamp(1 - sp3 * 0.9, 0, 1);
+      for (const [rx, ry, col] of rays) {
+        const inner = Math.round(lerp(1, rayL * 0.35, sp3));
+        drawPixelLine(
+          ctx,
+          ix + Math.round(rx * inner), iy - 1 + Math.round(ry * inner),
+          ix + Math.round(rx * rayL), iy - 1 + Math.round(ry * rayL),
+          sp3 < 0.22 ? '#ffffff' : col
+        );
+      }
+      // Crisp 2-frame white hit-core flash right under the belly!
+      if (sp3 < 0.25 && imp.big) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(ix - 4, iy - 3, 9, 3);
+      }
     }
     ctx.restore();
   }
 
-  // 5. Crisp pixel-art fish sprite (flopping furiously on the back of the dock or cartwheeling mid-air!)
+  // 5. Crisp pixel-art fish sprite (EXACT FLUSH GROUNDING on pierY — ZERO floating!)
   const animHz = isLanding ? (land.phase === 'launch' ? 20 : 16) : 14;
   const frame = Math.floor(g.time * animHz) % sprSet.right.length;
   const img = getOrientedFishFrame(sprSet, land.mode, frame);
   const drawW = Math.max(1, Math.round(img.width * (land.squashX || 1)));
   const drawH = Math.max(1, Math.round(img.height * (land.squashY || 1)));
+  const framePad = (land.mode === 'flip')
+    ? (sprSet.topPads ? sprSet.topPads[frame % sprSet.topPads.length] : (land.topPad || 0))
+    : (land.mode === 'right' || land.mode === 'left')
+      ? (sprSet.botPads ? sprSet.botPads[frame % sprSet.botPads.length] : (land.botPad || 0))
+      : 0;
+  const padDelta = framePad - (land.activePad || 0);
   const dx = Math.round(land.x - drawW / 2);
-  // Anchor bottom edge cleanly above pierY even during slam squash!
-  let dy = Math.round(land.y - drawH / 2);
-  if (dx <= g.pierEndX + 1 && dy + drawH > g.pierY) {
-    dy = g.pierY - drawH;
+  let dy = Math.round(land.y - drawH / 2) + ((land.phase === 'flop' || land.phase === 'settle' || land.phase === 'bounce1' || land.phase === 'bounce2') ? padDelta : 0);
+  // Keep current-frame bottom opaque pixel strictly flush on or above pierY (0px air gap, 0px pier sink!)
+  const maxOpaqueDy = g.pierY + 1 + framePad - drawH;
+  if (dx <= g.pierEndX + 1 && dy > maxOpaqueDy) {
+    dy = maxOpaqueDy;
   }
 
   if (drawW === img.width && drawH === img.height) {
@@ -1367,7 +1526,6 @@ function renderLandingFishForeground(g, ctx) {
     ctx.drawImage(img, dx, dy, drawW, drawH);
   }
 
-  // Keep Anglerfish bioluminescence & mythic/legendary sparkles alive right on the back of the dock!
   if (sp.id === 'angler' && (land.mode === 'right' || land.mode === 'left')) {
     renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, land.mode === 'right' ? 1 : -1, frame, g.time, 0, 0.4, 0.35);
   }
@@ -1388,7 +1546,7 @@ function renderLandingFishForeground(g, ctx) {
   if (land.showDizzyStars) {
     ctx.save();
     const headStarX = land.x + (land.mode === 'right' ? drawW * 0.25 : -drawW * 0.25);
-    const headStarY = Math.max(4, dy - 4);
+    const headStarY = Math.max(4, dy + (land.topPad || 0) - 4);
     for (let i = 0; i < 3; i++) {
       const a = g.time * 5.4 + i * ((Math.PI * 2) / 3);
       const ox = Math.round(headStarX + Math.cos(a) * 6.5);

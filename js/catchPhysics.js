@@ -13,18 +13,15 @@ function modeDims(mode, sprW, sprH) {
 
 function pickSpinMode(p, sprW, wf) {
   if (sprW <= 26) {
-    // Full 4-way crisp lossless pixel cartwheel somersault!
     const spins = lerp(3.0, 2.0, wf);
     const seq = ['left', 'hangCW', 'flip', 'hang'];
     return seq[Math.floor(p * spins * 4) % 4];
   }
-  // Large / giant fish: high-speed barrel-flip keeping vertical height compact over hat!
   const spins = lerp(2.2, 1.5, wf);
   const seq = ['left', 'flip'];
   return seq[Math.floor(p * spins * 2) % 2];
 }
 
-// Compute the angler's safe bounding box & hat top for strict zero-noclip clearance
 function getAnglerSafetyBounds(g, rig) {
   const footCenterX = g.anglerX + 11;
   const hx = rig ? rig.headX : footCenterX;
@@ -32,15 +29,10 @@ function getAnglerSafetyBounds(g, rig) {
   const sx = rig ? rig.shoulderX : footCenterX;
   const backFootX = rig ? rig.backFootX : (footCenterX - 4.5);
   const frontFootX = rig ? rig.frontFootX : (footCenterX + 4.5);
-
-  // Hat crown top pixel (accounting for the 2-3px panic hat-pop gust!)
   const hatPop = rig && Number.isFinite(rig.hatPopY) ? rig.hatPopY : 0;
   const hatTopY = Math.round(hy) - 7 - Math.ceil(hatPop);
-
-  // Strict horizontal clearance behind the angler (clearing back boot, hat brim, and fluttering scarf!)
   const anglerBackSafeX = Math.min(backFootX - 3.5, sx - 6.5, hx - 7.0);
   const anglerFrontSafeX = Math.max(frontFootX + 3.5, sx + 6.5, hx + 6.5);
-
   return { hatTopY, anglerBackSafeX, anglerFrontSafeX };
 }
 
@@ -57,34 +49,34 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
   const sprSet = fishId && g.sprites && g.sprites.fish && g.sprites.fish[fishId];
   const sprW = sprSet ? (sprSet.w || 20) : 20;
   const sprH = sprSet ? (sprSet.h || 13) : 13;
+  const botPad = sprSet && Number.isFinite(sprSet.botPad) ? sprSet.botPad : 0;
+  const topPad = sprSet && Number.isFinite(sprSet.topPad) ? sprSet.topPad : 0;
 
   const pierY = g.pierY;
   const pierEndX = g.pierEndX;
   const waterY = g.waterY;
   const bounds = getAnglerSafetyBounds(g, rig);
 
-  // ── Back-of-Dock Visible Arena Coordinates (0px angler noclip, 0px pier noclip!) ──
-  // Exact resting Y so sprite bottom pixel sits strictly at pierY - 1 (flush ON TOP of planks!)
-  const restY = pierY - sprH * 0.5 - 0.8;
+  // EXACT FLUSH DOCK GROUNDING (0.0px air gap — matches angler boot soles & bucket bottom on row pierY!):
+  // When drawn at dy = Math.round(restY - sprH / 2), the lowest opaque pixel row is:
+  //   dy + (sprH - 1 - botPad) === pierY  =>  restY = pierY + 1 + botPad - sprH * 0.5
+  const restY = pierY + 1 + botPad - sprH * 0.5;
+  const flipRestY = pierY + 1 + topPad - sprH * 0.5;
 
-  // Maximum right centerX that keeps the fish strictly behind the angler's back & scarf
   const maxSafeBackX = bounds.anglerBackSafeX - sprW * 0.5 - 1.5;
   const minScreenX = sprW * 0.5 + 2.0;
 
   let restX, slamX;
   if (maxSafeBackX >= minScreenX) {
-    // Generous visible back-of-dock zone! Slams closer to center-back, skids deeper onto dock!
     const idealRest = clamp(pierEndX * 0.27, minScreenX, maxSafeBackX);
     const slideDist = clamp(lerp(13, 6, wf), 3, Math.max(3, maxSafeBackX - idealRest));
     restX = idealRest;
     slamX = clamp(restX + slideDist, minScreenX, maxSafeBackX);
   } else {
-    // Ultra-narrow mobile portrait fallback for giant 56px Kraken: stays clear of angler & visible!
     restX = maxSafeBackX;
     slamX = maxSafeBackX;
   }
 
-  // Launch coordinates right over the water edge
   const startX = Math.max(
     Number.isFinite(g.landingStartX) ? g.landingStartX : (pierEndX + Math.max(12, sprW * 0.5 + 4)),
     pierEndX + sprW * 0.5 + 3
@@ -93,7 +85,6 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
   const launchX = pierEndX + Math.max(7, sprW * 0.5 + 2.5);
   const launchY = Math.min(pierY - sprH * 0.5 - 10, bounds.hatTopY - sprH * 0.5 + 8);
 
-  // Helper to evaluate a point along the overhead supersonic launch arc (p in 0..1)
   const evalLaunchArc = (p) => {
     const px = lerp(launchX, slamX, p);
     const mode = pickSpinMode(p, sprW, wf);
@@ -103,15 +94,13 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
     const neededLift = Math.max(16, baseY - targetPeakY);
     let py = baseY - Math.sin(p * Math.PI) * neededLift;
 
-    // Hard overhead clearance guard over angler head/hat/body!
     const overlapsAnglerX = (px + dims.w * 0.5) >= (bounds.anglerBackSafeX - 1) &&
                             (px - dims.w * 0.5) <= (bounds.anglerFrontSafeX + 1);
     if (overlapsAnglerX) {
       py = Math.min(py, bounds.hatTopY - dims.h * 0.5 - 2.5);
     }
-    // Hard wooden pier plank clearance guard!
     if ((px - dims.w * 0.5) <= pierEndX + 1.5) {
-      py = Math.min(py, pierY - dims.h * 0.5 - 0.8);
+      py = Math.min(py, pierY - dims.h * 0.5);
     }
     return { x: px, y: py, mode, w: dims.w, h: dims.h };
   };
@@ -123,135 +112,134 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
   let squashX = 1;
   let squashY = 1;
   const ghosts = [];
+  const windTrail = [];
 
   if (!isCaught) {
     if (t < 0.22) {
-      // PHASE 1: TURBO OVER-REEL YANK — fish ripped violently out of the ocean!
       phase = 'yank';
       const p = smoothstep(t / 0.22);
-      // Slight explosive acceleration curve (ease-in-out whip)
       const whipP = Math.pow(p, 0.85);
       fx = lerp(startX, launchX, whipP);
       fy = lerp(startY, launchY, whipP) - Math.sin(whipP * Math.PI) * 5;
       mode = 'left';
       if (fx - sprW * 0.5 <= pierEndX + 1.5) {
-        fy = Math.min(fy, pierY - sprH * 0.5 - 1.5);
+        fy = Math.min(fy, pierY - sprH * 0.5);
       }
       if (fx - sprW * 0.5 <= bounds.anglerFrontSafeX + 1) {
         fx = Math.max(fx, bounds.anglerFrontSafeX + sprW * 0.5 + 1.5);
       }
     } else if (t < 0.56) {
-      // PHASE 2: SUPERSONIC BALLISTIC LAUNCH OVER THE ANGLER'S HAT!
       phase = 'launch';
       const p = clamp((t - 0.22) / 0.34, 0, 1);
       const cur = evalLaunchArc(p);
       fx = cur.x;
       fy = cur.y;
       mode = cur.mode;
-      // 3 glowing pixel-art speed afterimage echoes trailing behind the soaring fish!
       for (let gi = 1; gi <= 3; gi++) {
         const gp = p - gi * 0.048;
         if (gp > 0.02) {
           const gPt = evalLaunchArc(gp);
-          ghosts.push({
-            x: gPt.x,
-            y: gPt.y,
-            mode: gPt.mode,
-            alpha: 0.42 - gi * 0.11,
-          });
+          ghosts.push({ x: gPt.x, y: gPt.y, mode: gPt.mode, alpha: 0.44 - gi * 0.11 });
         }
       }
+      // Sample exact curved slipstream wind ribbon points along the recent flight trajectory!
+      for (let wi = 0; wi <= 7; wi++) {
+        const wp = clamp(p - wi * 0.045, 0, 1);
+        const pt = evalLaunchArc(wp);
+        windTrail.push({ x: pt.x, y: pt.y, u: wi / 7 });
+      }
     } else if (t < 0.75) {
-      // PHASE 3: MEGA DOCK SLAM #1 + HIGH ELASTIC CARTOON BOUNCE + SKID!
       phase = 'bounce1';
       const b1 = clamp((t - 0.56) / 0.19, 0, 1);
       const midX = lerp(slamX, restX, 0.68);
       fx = lerp(slamX, midX, smoothstep(b1));
-      const bounceH1 = lerp(13.5, 8.2, wf);
-      fy = restY - Math.sin(b1 * Math.PI) * bounceH1;
+      const bounceH1 = lerp(12.5, 7.8, wf);
       mode = (b1 > 0.18 && b1 < 0.80) ? 'flip' : 'right';
-      // Impact squash right at slam, stretch at rebound launch
+      const floorY = mode === 'flip' ? flipRestY : restY;
+      fy = floorY - Math.sin(b1 * Math.PI) * bounceH1;
       if (b1 < 0.16) {
-        squashX = 1.24;
-        squashY = 0.78;
-      } else if (b1 < 0.32) {
-        squashX = 0.88;
-        squashY = 1.14;
+        squashX = 1.28;
+        squashY = 0.74;
+      } else if (b1 < 0.30) {
+        squashX = 0.86;
+        squashY = 1.15;
       }
     } else if (t < 0.90) {
-      // PHASE 4: SLAM #2 + SPRINGY BOUNCE #2 + SKID TO REST SPOT!
       phase = 'bounce2';
       const b2 = clamp((t - 0.75) / 0.15, 0, 1);
       const midX = lerp(slamX, restX, 0.68);
       fx = lerp(midX, restX, smoothstep(b2));
-      const bounceH2 = lerp(6.8, 3.8, wf);
+      const bounceH2 = lerp(5.8, 3.2, wf);
       fy = restY - Math.sin(b2 * Math.PI) * bounceH2;
       mode = 'right';
       if (b2 < 0.18) {
-        squashX = 1.14;
-        squashY = 0.88;
+        squashX = 1.16;
+        squashY = 0.86;
       }
     } else {
-      // PHASE 5: SETTLE DOUBLE TAIL-SLAP ON BACK OF DOCK -> SEAMLESS INTO CAUGHT!
       phase = 'settle';
       const s = clamp((t - 0.90) / 0.10, 0, 1);
       fx = restX;
-      // Smoothly ends at 0 hop at s=1.0 for 0.00px continuity into CAUGHT!
-      const settleHop = Math.sin(s * Math.PI) * Math.abs(Math.sin(s * Math.PI * 2)) * lerp(2.8, 1.6, wf);
+      // Quick grounded skid-settle ending flush on pierY (0px gap!)
+      const settleHop = s < 0.55 ? Math.sin((s / 0.55) * Math.PI) * lerp(2.0, 1.1, wf) : 0;
       fy = restY - settleHop;
       mode = 'right';
+      if (s >= 0.55 && s < 0.78) {
+        squashX = 1.08;
+        squashY = 0.93;
+      }
     }
   } else {
-    // LIVE CAUGHT STATE: VISIBLY FLOPPING ON THE BACK OF THE DOCK!
+    // LIVE CAUGHT STATE: FIRMLY GROUNDED ON THE BACK OF THE DOCK with snappy periodic wet flop hops!
     phase = 'flop';
-    const cycle = 1.28;
+    const cycle = 1.55;
     const local = ct % cycle;
     let flopHop = 0;
     let flopSlide = 0;
-    // Energetic wet-fish flop burst every 1.28s (starts gently after ct=0.14 so ct=0 matches t=1.0 seamlessly!)
-    if (ct > 0.10 && local > 0.14 && local < 0.54) {
-      const fp = (local - 0.14) / 0.40;
-      const hopPeak = lerp(5.8, 3.2, wf);
-      flopHop = Math.sin(fp * Math.PI) * hopPeak;
-      flopSlide = Math.sin(fp * Math.PI * 2) * lerp(1.4, 0.6, wf);
-      // Small/medium fish even briefly flip upside-down mid-flop for pure arcade comedy!
-      if (sprW <= 26 && fp > 0.25 && fp < 0.72 && Math.floor(ct / cycle) % 2 === 1) {
-        mode = 'flip';
-      } else {
-        mode = 'right';
-      }
-    } else if (ct > 0.10 && local > 0.64 && local < 0.84) {
-      // Secondary quick tail-slap twitch!
-      const tp = (local - 0.64) / 0.20;
-      flopHop = Math.sin(tp * Math.PI) * lerp(2.6, 1.4, wf);
+    // Rests firmly flush on wooden planks ~76% of the time; bursts into snappy wet flop hops!
+    if (ct > 0.35 && local > 0.82 && local < 1.10) {
+      const fp = (local - 0.82) / 0.28;
+      flopHop = Math.sin(fp * Math.PI) * lerp(4.4, 2.4, wf);
+      flopSlide = Math.sin(fp * Math.PI * 2) * lerp(1.2, 0.5, wf);
+      mode = (sprW <= 26 && fp > 0.28 && fp < 0.70 && Math.floor(ct / cycle) % 2 === 1) ? 'flip' : 'right';
+    } else if (ct > 0.35 && local >= 1.10 && local < 1.22) {
+      // Tactile belly slap-down squash on the wooden planks!
+      squashX = 1.12;
+      squashY = 0.90;
       mode = 'right';
     } else {
       mode = 'right';
     }
     fx = clamp(restX + flopSlide, minScreenX <= maxSafeBackX ? minScreenX : restX, maxSafeBackX);
-    fy = restY - flopHop;
+    const floorY = mode === 'flip' ? flipRestY : restY;
+    fy = floorY - flopHop;
   }
 
-  // Final hard plank floor safety clamp: ZERO pixels EVER clip into wooden pier planks!
   const dims = modeDims(mode, sprW, sprH);
+  // Floor guard: lowest opaque pixel strictly <= pierY (flush ON TOP of planks, ZERO sinking into pierY+1..pierY+4!)
+  const activePad = mode === 'flip' ? topPad : (mode === 'right' || mode === 'left') ? botPad : 0;
+  const maxGroundedCenterY = pierY + 1 + activePad - dims.h * 0.5;
   if ((fx - dims.w * 0.5) <= pierEndX + 1.5) {
-    fy = Math.min(fy, pierY - dims.h * 0.5 - 0.8);
+    fy = Math.min(fy, maxGroundedCenterY);
   }
-  // Final hard back-dock body safety clamp once landed
   if (t >= 0.56 || isCaught) {
     fx = Math.min(fx, maxSafeBackX);
   }
 
-  // Hook attaches to fish mouth while line is taut during Beat 1 yank!
   const hookX = fx - sprW * 0.42;
   const hookY = fy + 0.5;
 
-  // Impact comic starburst / shockwave ring progress for Slam #1 and Slam #2
+  // Sonic air-break shock ring at launch breakout (t = 0.20..0.40)
+  const sonicRing = (!isCaught && t >= 0.20 && t < 0.40)
+    ? { x: launchX - 2, y: launchY, progress: (t - 0.20) / 0.20 }
+    : null;
+
+  // Rich dock slam impact FX windows (Slam #1 at t=0.56..0.76, Bounce Slam #2 at t=0.75..0.90)
   let impactFlash = null;
-  if (!isCaught && t >= 0.56 && t < 0.70) {
-    impactFlash = { x: slamX, y: pierY - 1, progress: (t - 0.56) / 0.14, big: true };
-  } else if (!isCaught && t >= 0.75 && t < 0.84) {
-    impactFlash = { x: lerp(slamX, restX, 0.68), y: pierY - 1, progress: (t - 0.75) / 0.09, big: false };
+  if (!isCaught && t >= 0.56 && t < 0.76) {
+    impactFlash = { x: slamX, y: pierY, progress: (t - 0.56) / 0.20, big: true, wf };
+  } else if (!isCaught && t >= 0.75 && t < 0.90) {
+    impactFlash = { x: lerp(slamX, restX, 0.68), y: pierY, progress: (t - 0.75) / 0.15, big: false, wf };
   }
 
   return {
@@ -261,12 +249,18 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
     mode,
     w: dims.w,
     h: dims.h,
+    botPad,
+    topPad,
+    activePad,
     squashX,
     squashY,
     hookX,
     hookY,
     ghosts,
+    windTrail,
+    sonicRing,
     impactFlash,
+    hatGust: !isCaught && t >= 0.26 && t <= 0.54 ? Math.sin(((t - 0.26) / 0.28) * Math.PI) : 0,
     showPuddle: isCaught || t >= 0.56,
     showDizzyStars: isCaught || t >= 0.76,
     slamX,
