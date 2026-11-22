@@ -287,7 +287,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
         const sqAmt = Math.sin(sp * Math.PI);
         squashX = 1 + (maxImpactSX - 1) * sqAmt;
         squashY = 1 - (isGiant ? 0.16 : isBig ? 0.22 : 0.28) * sqAmt;
-        hitFlash = b1 < 0.065; // ultra-snappy 2-frame impact white flash!
+        hitFlash = !isBig && b1 < 0.055; // crisp 1-frame flash for small fish; big fish keep full crisp art!
       } else {
         // Weighted parabolic rebound hop + smooth foreshortened flip from 'left' -> 'right' across the apex!
         const airP = (b1 - 0.16) / 0.84;
@@ -295,12 +295,17 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
         const bounceH1 = lerp(10.5, 5.8, wf);
         fy = restY - Math.sin(airP * Math.PI) * bounceH1;
 
-        // Smooth 3D-like foreshortened turnaround centered at airP = 0.50 (width smoothly pinches to 0.22 at midpoint!)
-        // Zero sudden horizontal teleport pop!
-        const turnWindow = clamp((airP - 0.22) / 0.56, 0, 1);
-        const cosTurn = Math.cos(turnWindow * Math.PI); // +1 -> 0 -> -1
-        mode = cosTurn >= 0 ? 'left' : 'right';
-        flipScaleX = Math.max(0.22, Math.abs(cosTurn));
+        if (isBig) {
+          // Big/giant fish stay un-pinched & weighty facing 'left' (ZERO squished-accordion glitch!)
+          mode = 'left';
+          flipScaleX = 1;
+        } else {
+          // Small fish do a nimble foreshortened bounce flip from 'left' -> 'right'
+          const turnWindow = clamp((airP - 0.22) / 0.56, 0, 1);
+          const cosTurn = Math.cos(turnWindow * Math.PI);
+          mode = cosTurn >= 0 ? 'left' : 'right';
+          flipScaleX = Math.max(0.26, Math.abs(cosTurn));
+        }
 
         // Gentle weighted rock (max +/- 10° for giant, +/- 15° for small — butter-smooth!)
         const rockMax = isGiant ? 0.14 : isBig ? 0.19 : 0.26;
@@ -321,7 +326,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
       fx = lerp(midX, restX, smootherstep(b2));
       const bounceH2 = lerp(4.8, 2.4, wf);
       fy = restY - Math.sin(b2 * Math.PI) * bounceH2;
-      mode = 'right';
+      mode = isBig ? 'left' : 'right';
       const rock2 = isGiant ? 0.08 : isBig ? 0.11 : 0.16;
       angle = b2 < 0.15 ? 0 : Math.sin(((b2 - 0.15) / 0.85) * Math.PI * 2) * rock2 * Math.sin(b2 * Math.PI);
       if (b2 < 0.16) {
@@ -337,7 +342,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
       fx = restX;
       const settleHop = s < 0.50 ? Math.sin((s / 0.50) * Math.PI) * lerp(1.6, 0.8, wf) : 0;
       fy = restY - settleHop;
-      mode = 'right';
+      mode = isBig ? 'left' : 'right';
       angle = 0;
       if (s >= 0.50 && s < 0.78) {
         const sp = (s - 0.50) / 0.28;
@@ -353,7 +358,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
     const local = ct % cycle;
     let flopHop = 0;
     let flopSlide = 0;
-    mode = 'right';
+    mode = isBig ? 'left' : 'right';
     angle = 0;
     if (ct > 0.35 && local > 0.82 && local < 1.10) {
       const fp = (local - 0.82) / 0.28;
@@ -398,9 +403,9 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
 
   let impactFlash = null;
   if (!isCaught && t >= 0.56 && t < 0.75) {
-    impactFlash = { x: fx, y: pierY, progress: (t - 0.56) / 0.19, big: true, wf, halfW: sprW * 0.45 };
+    impactFlash = { x: fx, y: pierY, progress: (t - 0.56) / 0.19, big: true, wf, halfW: sprW * 0.54 };
   } else if (!isCaught && t >= 0.76 && t < 0.89) {
-    impactFlash = { x: fx, y: pierY, progress: (t - 0.76) / 0.13, big: false, wf, halfW: sprW * 0.40 };
+    impactFlash = { x: fx, y: pierY, progress: (t - 0.76) / 0.13, big: false, wf, halfW: sprW * 0.50 };
   }
 
   return {

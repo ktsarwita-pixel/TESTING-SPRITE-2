@@ -1601,7 +1601,7 @@ function renderLandingFishForeground(g, ctx) {
     // Crisp expanding semi-elliptical shockwave dome hugging the wooden planks!
     if (p < 0.75) {
       const dp = p / 0.75;
-      const rx = lerp(hw * 0.85, maxR, Math.pow(dp, 0.58));
+      const rx = lerp(hw * 1.04, maxR + 3, Math.pow(dp, 0.58));
       const ry = lerp(Math.max(5, sprSet.h * 0.45), Math.max(9, sprSet.h * 0.65) + wf * 5, Math.pow(dp, 0.62));
       const domeFade = (1 - dp) * (imp.big ? 0.92 : 0.68);
       const steps = 18;
@@ -1618,9 +1618,9 @@ function renderLandingFishForeground(g, ctx) {
     // 6 bold brief arcade impact spark wedges radiating OUTSIDE the squashed fish (frames 1-5, p < 0.38!)
     if (imp.big && p < 0.38) {
       const wp = p / 0.38;
-      const innerR = hw * 0.72 + wp * 4;
-      const outerR = innerR + lerp(7, 13 + wf * 4, Math.pow(wp, 0.6));
-      const dirs = [[-0.98, -0.22], [-0.75, -0.68], [-0.30, -0.95], [0.30, -0.95], [0.75, -0.68], [0.98, -0.22]];
+      const innerR = hw * 1.02 + wp * 3;
+      const outerR = innerR + lerp(5, 10 + wf * 3, Math.pow(wp, 0.6));
+      const dirs = [[-1.0, -0.18], [-0.88, -0.52], [0.88, -0.52], [1.0, -0.18]];
       ctx.globalAlpha = clamp(1 - wp * 0.82, 0.15, 1);
       for (const [dx2, dy2] of dirs) {
         const x1 = ix + Math.round(dx2 * innerR);

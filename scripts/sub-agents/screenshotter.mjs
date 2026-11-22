@@ -399,7 +399,7 @@ export function rasterizeFrame(fishId, st) {
     }
     if (p < 0.75) {
       const dp = p / 0.75;
-      const rx = lerp(hw * 0.85, maxR, Math.pow(dp, 0.58));
+      const rx = lerp(hw * 1.04, maxR + 3, Math.pow(dp, 0.58));
       const ry = lerp(Math.max(5, imgH * 0.45), Math.max(9, imgH * 0.65) + wf2 * 5, Math.pow(dp, 0.62));
       for (let i = 0; i <= 18; i++) {
         const a = Math.PI + (i / 18) * Math.PI;
@@ -409,9 +409,9 @@ export function rasterizeFrame(fishId, st) {
     }
     if (imp.big && p < 0.38) {
       const wp = p / 0.38;
-      const innerR = hw * 0.72 + wp * 4;
-      const outerR = innerR + lerp(7, 13 + wf2 * 4, Math.pow(wp, 0.6));
-      for (const [dx2, dy2] of [[-0.98,-0.22],[-0.75,-0.68],[-0.30,-0.95],[0.30,-0.95],[0.75,-0.68],[0.98,-0.22]]) {
+      const innerR = hw * 1.02 + wp * 3;
+      const outerR = innerR + lerp(5, 10 + wf2 * 3, Math.pow(wp, 0.6));
+      for (const [dx2, dy2] of [[-1.0,-0.18],[-0.88,-0.52],[0.88,-0.52],[1.0,-0.18]]) {
         const x1 = ix + Math.round(dx2 * innerR), y1 = iy - 2 + Math.round(dy2 * innerR * 0.62);
         const x2 = ix + Math.round(dx2 * outerR), y2 = iy - 2 + Math.round(dy2 * outerR * 0.78);
         extraOps.push({ op: 'line', x0: x1, y0: y1, x1: x2, y1: y2, c: wp < 0.35 ? '#ffffff' : '#fde047', a: clamp(1 - wp * 0.82, 0.15, 1) });
