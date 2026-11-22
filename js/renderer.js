@@ -1247,15 +1247,25 @@ function renderLandingFishForeground(g, ctx) {
   const f = g.activeFish;
   const sprSet = g.sprites.fish[f.species.id];
   if (!sprSet) return;
-  const animHz = (g.landingT || 0) < 0.62 ? 14 : 11.0;
-  const frame = Math.floor(g.time * animHz) % sprSet.right.length;
-  const img = sprSet.right[frame];
-  const dx = Math.round(f.x - sprSet.w / 2);
-  const dy = Math.round(f.y - sprSet.h / 2);
-
-  ctx.drawImage(img, dx, dy);
-  if (f.species.id === 'angler') {
-    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, 1, frame, g.time, f.phase, 0.5, 0.4);
+  const dir = f.dir >= 0 ? 1 : -1;
+  const animHz = (g.landingT || 0) < 0.62 ? 15 : 12.5;
+  const frames = dir >= 0 ? sprSet.right : sprSet.left;
+  const frame = Math.floor(g.time * animHz) % frames.length;
+  const img = frames[frame];
+  const sx = clamp(g.landingTurnScaleX ?? 1, 0.24, 1);
+  if (sx < 0.99) {
+    // Crisp 16-bit horizontal catch-turn flip (zero rotation tearing — keeps every scanline razor-sharp!)
+    const drawW = Math.max(4, Math.round(sprSet.w * sx));
+    const dx = Math.round(f.x - drawW / 2);
+    const dy = Math.round(f.y - sprSet.h / 2);
+    ctx.drawImage(img, dx, dy, drawW, sprSet.h);
+  } else {
+    const dx = Math.round(f.x - sprSet.w / 2);
+    const dy = Math.round(f.y - sprSet.h / 2);
+    ctx.drawImage(img, dx, dy);
+    if (f.species.id === 'angler') {
+      renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, dir, frame, g.time, f.phase, 0.5, 0.4);
+    }
   }
 
   // Once the angler catches the fish (t >= 0.62), draw crisp foreground gripping fingers over the grip point
@@ -1442,14 +1452,16 @@ function renderLineAndHook(g, ctx) {
 
   if (g.state === 'LANDING') {
     const t = clamp(g.landingT || 0, 0, 1);
-    if (t < 0.44) {
-      drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#e2e8f0');
-    } else if (t < 0.66) {
-      const p = (t - 0.44) / 0.22;
+    if (t < 0.40) {
+      // Taut loaded fishing line pulling the fish's mouth straight out of the water!
+      drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#f1f5f9');
+    } else if (t < 0.58) {
+      // Line smoothly goes slack into a natural catenary droop and fades cleanly before the trophy turn
+      const p = (t - 0.40) / 0.18;
       const mx = (rod.tipX + g.hookX) * 0.5;
-      const my = (rod.tipY + g.hookY) * 0.5 + 3 + p * 7;
+      const my = (rod.tipY + g.hookY) * 0.5 + 3 + p * 8;
       ctx.save();
-      ctx.globalAlpha = clamp(1 - p, 0.08, 1);
+      ctx.globalAlpha = clamp(1 - p * 0.92, 0.08, 1);
       drawPixelQuad(ctx, rod.tipX, rod.tipY, mx, my, g.hookX, g.hookY, '#cbd5e1', 12);
       ctx.restore();
     }

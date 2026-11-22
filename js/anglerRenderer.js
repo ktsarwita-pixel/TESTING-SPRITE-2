@@ -112,8 +112,8 @@ export function computeAnglerRig(g) {
   const footCenterX = g.anglerX + 11;
   const groundY = g.pierY; // exact plank top surface row
 
-  // Natural athletic stance (widens smoothly when bracing/fighting)
-  const stanceHalf = lerp(3.4, 5.1, clamp(g.animStance || 0, 0, 1));
+  // Natural athletic stance with subtle weight-transfer bias during heave vs. forward catch!
+  const stanceHalf = lerp(3.3, 5.0, clamp(g.animStance || 0, 0, 1));
   const backFootX = footCenterX - stanceHalf;
   const frontFootX = footCenterX + stanceHalf;
 
@@ -122,16 +122,43 @@ export function computeAnglerRig(g) {
   const squat = g.animSquat || 0;
   const breath = Math.sin(g.time * 2.4) * 0.35;
 
-  // Slightly taller, heroic proportions (sleeker, less stubby/blocky!)
-  const hipX = footCenterX + lean * 0.45;
-  const hipY = groundY - 11.2 + squat * 0.72;
+  // Weight-shift: hips track smoothly between back brace and front foot during catch
+  const hipX = footCenterX + lean * 0.48;
+  const hipY = groundY - 11.2 + squat * 0.74;
 
   const shoulderX = hipX + lean * 0.68;
   const shoulderY = hipY - 8.4 + breath * 0.55;
 
+  // Dynamic head-tracking & gaze follow (watches water breach -> tracks arcing fish -> proud lift on catch!)
+  let headTrackX = 0;
+  let headTrackY = 0;
+  if (g.state === 'LANDING') {
+    const lt = clamp(g.landingT || 0, 0, 1);
+    if (lt < 0.38) {
+      // Focused forward-down gaze watching the fish break out of the waves
+      const p = smoothstep(lt / 0.38);
+      headTrackX = lerp(0.1, 0.45, p);
+      headTrackY = lerp(0.1, 0.35, p);
+    } else if (lt < 0.62) {
+      // Head lifts subtly tracking the fish arcing cleanly across the pier air
+      const p = smoothstep((lt - 0.38) / 0.24);
+      headTrackX = lerp(0.45, 0.55, p);
+      headTrackY = lerp(0.35, -0.45, Math.sin(p * Math.PI));
+    } else {
+      // Catch impact nod followed by proud upright trophy gaze
+      const p = smoothstep((lt - 0.62) / 0.38);
+      const impactNod = Math.exp(-Math.pow((lt - 0.64) / 0.06, 2)) * 0.55;
+      headTrackX = lerp(0.55, 0.25, p);
+      headTrackY = impactNod - p * 0.25;
+    }
+  } else if (g.state === 'CAUGHT') {
+    headTrackX = 0.25;
+    headTrackY = -0.25;
+  }
+
   // Head sits seamlessly on top of the neck & spine (zero floating gap even on full lean-back!)
-  const headX = shoulderX + clamp(lean * 0.12, -0.6, 0.8) + 0.35;
-  const headY = shoulderY - 4.0;
+  const headX = shoulderX + clamp(lean * 0.12, -0.6, 0.8) + 0.35 + headTrackX;
+  const headY = shoulderY - 4.0 + headTrackY;
 
   const rodAngle = g.rodAngle ?? -0.62;
   const cosA = Math.cos(rodAngle);
@@ -152,25 +179,37 @@ export function computeAnglerRig(g) {
     const initGDY = Number.isFinite(g.landingInitGripDY) ? g.landingInitGripDY : 1.2;
     const initRDX = Number.isFinite(g.landingInitReelDX) ? g.landingInitReelDX : (initGDX - cosA * 3.0);
     const initRDY = Number.isFinite(g.landingInitReelDY) ? g.landingInitReelDY : (initGDY - sinA * 3.0 + 0.4);
-    const heaveP = smoothstep(clamp(t / 0.42, 0, 1));
-    const heaveGX = lerp(shoulderX + initGDX, shoulderX + 4.6, heaveP);
-    const heaveGY = lerp(shoulderY + initGDY, shoulderY - 0.8 - wf * 0.4, heaveP);
-    const heaveRX = lerp(shoulderX + initRDX, shoulderX + 2.8, heaveP);
-    const heaveRY = lerp(shoulderY + initRDY, shoulderY + 1.4, heaveP);
+    const heaveP = smoothstep(clamp(t / 0.38, 0, 1));
+    const heaveGX = lerp(shoulderX + initGDX, shoulderX + 4.4, heaveP);
+    const heaveGY = lerp(shoulderY + initGDY, shoulderY - 1.0 - wf * 0.5, heaveP);
+    const heaveRX = lerp(shoulderX + initRDX, shoulderX + 2.6, heaveP);
+    const heaveRY = lerp(shoulderY + initRDY, shoulderY + 1.3 + wf * 0.3, heaveP);
 
-    // Outstretched NEAR/FRONT hand (reelX, reelY) catches and displays the fish cleanly in front of the angler!
+    // Outstretched NEAR/FRONT hand (reelX, reelY) anticipates, catches with realistic weight cushion, then lifts proudly!
     // Back/FAR hand (gripX, gripY) NEVER lets go of the rod — smoothly tucks it behind the rear shoulder!
     const catchDip = g.state === 'LANDING'
-      ? Math.exp(-Math.pow((t - 0.62) / 0.08, 2)) * (0.65 + wf * 0.85)
+      ? Math.exp(-Math.pow((t - 0.62) / 0.075, 2)) * (0.65 + wf * 1.35)
       : 0;
-    const ct = g.state === 'CAUGHT' ? (g.catchTime || 0) : 0;
-    const bob = g.state === 'CAUGHT' ? Math.sin(ct * 3.8) * 0.65 : 0;
+    const anticipateLift = g.state === 'LANDING'
+      ? Math.exp(-Math.pow((t - 0.54) / 0.055, 2)) * 0.75
+      : 0;
 
-    // Comfortably within 8.4px of frontShoulder (shoulderX - 1.4, shoulderY + 0.8): zero hyper-extension!
-    const handMeetX = shoulderX + 6.4;
-    const handMeetY = shoulderY + 1.6 + catchDip;
+    // Lively intermittent fish wriggle/flop bursts in CAUGHT (natural wet fish energy, never robotic sine!)
+    const ct = g.state === 'CAUGHT' ? (g.catchTime || 0) : 0;
+    const initialFlop = g.state === 'CAUGHT' ? Math.exp(-ct * 3.4) * Math.sin(ct * 26) * (0.45 + wf * 0.35) : 0;
+    const burstPhase = (ct + 0.6) % 2.3;
+    const flopBurst = g.state === 'CAUGHT' && ct > 0.7 && burstPhase < 0.32
+      ? Math.sin((burstPhase / 0.32) * Math.PI) * Math.sin(burstPhase * 42) * 0.55
+      : 0;
+    const calmBob = g.state === 'CAUGHT' ? Math.sin(ct * 3.2) * 0.55 : 0;
+    const fishWriggleY = calmBob + initialFlop + flopBurst;
+
+    // Comfortably within <= 8.5px of frontShoulder (shoulderX - 1.4, shoulderY + 0.8): natural soft elbow bend!
+    const handMeetX = shoulderX + 6.3 + anticipateLift * 0.45;
+    const handMeetY = shoulderY + 1.5 - anticipateLift + catchDip;
+    // Heavy fish sits slightly lower & more braced; light fish lifts jauntier!
     const handProudX = shoulderX + 6.9;
-    const handProudY = shoulderY - 0.5 + bob;
+    const handProudY = shoulderY - 0.75 + wf * 0.85 + fishWriggleY * 0.7;
     const raiseP = g.state === 'CAUGHT'
       ? 1
       : t <= 0.62
@@ -185,15 +224,15 @@ export function computeAnglerRig(g) {
       ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
       : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]);
     const sprW = fishObj ? (fishObj.w || fishObj.right[0].width || 20) : 20;
-    const gripInset = Math.min(3.2, sprW * 0.18);
+    const gripInset = Math.min(2.5, sprW * 0.16);
     catchHoldX = holdHandX + sprW * 0.5 - gripInset;
-    catchHoldY = holdHandY + 0.5;
+    catchHoldY = holdHandY + 0.4 + (g.state === 'CAUGHT' ? (initialFlop + flopBurst) * 0.45 : 0);
 
     // Back hand resting position behind the rear shoulder (cozy ~5.0px reach from backShoulder!)
     const rodRestX = shoulderX - 3.6;
     const rodRestY = shoulderY + 2.2;
 
-    if (t < 0.42) {
+    if (t < 0.38) {
       gripX = heaveGX;
       gripY = heaveGY;
       reelX = heaveRX;
@@ -201,7 +240,7 @@ export function computeAnglerRig(g) {
       tuck = 0;
     } else if (t < 0.62) {
       // Smooth non-crossing choreography: back hand tucks rod behind shoulder, front hand reaches out to catch fish!
-      const swP = smoothstep((t - 0.42) / 0.20);
+      const swP = smoothstep((t - 0.38) / 0.24);
       tuck = swP;
       gripX = lerp(heaveGX, rodRestX, swP);
       gripY = lerp(heaveGY, rodRestY, swP);
@@ -239,19 +278,19 @@ export function computeAnglerRig(g) {
     reelY = gripY - sinA * 3.2;
   } else {
     // Waiting / retrieving / bite / reeling:
-    const pullBack = g.state === 'REELING' ? (g.tension || 0) * 1.6 : 0;
-    gripX = shoulderX + 6.8 - pullBack;
-    gripY = shoulderY + 1.5 - (g.state === 'BITE' ? 1.4 : 0);
+    const pullBack = g.state === 'REELING' ? (g.tension || 0) * 1.5 : 0;
+    gripX = shoulderX + 6.2 - pullBack;
+    gripY = shoulderY + 1.4 - (g.state === 'BITE' ? 1.4 : 0);
 
-    const seatX = gripX - cosA * 2.6;
-    const seatY = gripY - sinA * 2.6 + 1.5;
+    const seatX = gripX - cosA * 2.8;
+    const seatY = gripY - sinA * 2.8 + 1.4;
 
     const isCranking =
       (g.state === 'REELING' && (g.reelHold || g.devAutoLand) && !g.fishThrashing) ||
       (g.state === 'WAITING' && g.retrieving);
 
     if (isCranking) {
-      const crankR = 1.9;
+      const crankR = 1.65;
       const ca = g.crankAngle || 0;
       reelX = seatX + Math.cos(ca) * crankR;
       reelY = seatY + Math.sin(ca) * crankR;
@@ -421,7 +460,7 @@ function drawSculptedHeadAndHat(ctx, g, rig) {
   const blinking = (g.time % 4.6) > 4.48 && g.state === 'IDLE';
   const straining =
     (g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72)) ||
-    (g.state === 'LANDING' && (g.landingT || 0) < 0.42);
+    (g.state === 'LANDING' && (g.landingT || 0) < 0.38);
   const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && (g.landingT || 0) >= 0.62);
 
   if (blinking) {
@@ -504,8 +543,9 @@ export function renderArticulatedAngler(g, ctx) {
   drawOrganicLimb(ctx, backElbow.x, backElbow.y, rig.gripX, rig.gripY, '#f7c8a4', '#e0a27b', '#8c5335', 1.6, 1.3);
 
   // 3. Fluttering layered crimson scarf streaming behind the neck
-  const w1 = Math.sin(g.time * 5.0) * 1.4;
-  const w2 = Math.cos(g.time * 7.8 + 0.8) * 1.2;
+  const gustBoost = g.state === 'LANDING' ? 1.55 : g.state === 'CASTING' ? 1.8 : 1.0;
+  const w1 = Math.sin(g.time * 5.0 * gustBoost) * (1.35 * Math.min(1.4, gustBoost));
+  const w2 = Math.cos(g.time * 7.8 * gustBoost + 0.8) * (1.15 * Math.min(1.4, gustBoost));
   const neckX = rig.shoulderX - 1.5;
   const neckY = rig.shoulderY + 0.2;
   drawOrganicLimb(ctx, neckX, neckY, neckX - 4.2, neckY + 0.8 + w1 * 0.45, '#ff6b6b', '#d93d46', '#7d1924', 1.7, 1.2);
@@ -595,7 +635,10 @@ export function renderArticulatedAngler(g, ctx) {
     const spId = g.lastCatchInfo.species.id;
     const frames = g.sprites.fish[spId].right;
     const ct = g.catchTime || 0;
-    const flopSpeed = ct < 1.0 ? 11.0 : 6.5;
+    // Lively wet tail-twitch bursts right after catch + periodic natural wriggles!
+    const burstPhase = (ct + 0.6) % 2.3;
+    const inTailTwitch = ct < 0.68 || (ct > 0.7 && burstPhase < 0.32);
+    const flopSpeed = inTailTwitch ? 13.5 : 5.2;
     const fSpr = frames[Math.floor(g.time * flopSpeed) % frames.length];
     const fx = Math.round(rig.catchHoldX - fSpr.width / 2);
     const fy = Math.round(rig.catchHoldY - fSpr.height / 2);
