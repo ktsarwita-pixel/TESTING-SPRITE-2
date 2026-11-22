@@ -2251,8 +2251,12 @@ class PierlineGame {
       this.updateReeling(dt);
     } else if (this.state === 'LANDING') {
       const wf = this.landingWeightFactor ?? 0.35;
-      // Snappy comedic tempo: ~1.55s for light minnows -> ~1.88s blockbuster slam for Leviathan/Kraken!
-      this.landingT += dt * lerp(0.65, 0.53, wf);
+      if (this.landingHitstop && this.landingHitstop > 0) {
+        this.landingHitstop = Math.max(0, this.landingHitstop - dt);
+      } else {
+        // Snappy comedic tempo: ~1.48s for light minnows -> ~1.82s blockbuster slam for Leviathan/Kraken!
+        this.landingT += dt * lerp(0.68, 0.55, wf);
+      }
       const t = clamp(this.landingT, 0, 1);
       const rig = computeAnglerRig(this);
       const land = computeBackDockLanding(this, rig);
@@ -2269,7 +2273,7 @@ class PierlineGame {
       }
 
       // 2. Beat 2 launch trigger: supersonic WHOOSH + golden line-ping spark burst as fish rockets over hat!
-      if (!this.landingLaunchDone && t >= 0.22) {
+      if (!this.landingLaunchDone && t >= 0.20) {
         this.landingLaunchDone = true;
         sound.playOverReelLaunch(wf, this.panAtX(fx));
         for (let i = 0; i < 10; i++) {
@@ -2290,6 +2294,7 @@ class PierlineGame {
       if (!this.landingSlam1Done && t >= 0.56) {
         this.landingSlam1Done = true;
         this.landingGrabDone = true;
+        this.landingHitstop = 0.042 + wf * 0.024;
         sound.playDockSlam(wf, 0, this.panAtX(land.slamX));
         this.shakeTime = Math.max(this.shakeTime, 0.24 + wf * 0.20);
         this.shakeMag = Math.max(this.shakeMag, 1.9 + wf * 2.6);

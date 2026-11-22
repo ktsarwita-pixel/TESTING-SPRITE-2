@@ -227,105 +227,217 @@ export function rasterizeFrame(fishId, st) {
     extraOps.push({ op: 'rect', x: pudX, y: g.pierY, w: pudW, h: 1, c: '#38bdf8', a: 0.45 });
   }
 
-  // Speed afterimage ghosts during overhead launch
-  if (land.ghosts) {
-    for (let i = land.ghosts.length - 1; i >= 0; i--) {
-      const gh = land.ghosts[i];
-      const gg = getFishGrid(fishId, gh.mode);
+  // 1. Concave Frothy Ocean Breach Splash Crown
+  if (land.breachPlume) {
+    const bp = land.breachPlume;
+    const p = clamp(bp.progress, 0, 1);
+    const bx = Math.round(bp.x), wy = Math.round(bp.y);
+    const wf2 = bp.wf ?? 0.35;
+    const rise = Math.sin(Math.pow(p, 0.58) * Math.PI);
+    const curH = Math.max(2, Math.round(rise * (12 + wf2 * 9)));
+    const spread = Math.round(lerp(4, 15 + wf2 * 6, Math.pow(p, 0.68)));
+    const fade = clamp(1 - Math.max(0, p - 0.30) / 0.70, 0, 1);
+    for (let row = 0; row < curH; row++) {
+      const f = row / Math.max(1, curH);
+      const hw = Math.max(1, Math.round(1 + Math.pow(1 - f, 1.85) * (5.5 + wf2 * 2.5)));
+      extraOps.push({ op: 'rect', x: bx - hw, y: wy - row, w: hw * 2 + 1, h: 1, c: f > 0.55 ? '#e0f2fe' : f > 0.22 ? '#7dd3fc' : '#38bdf8', a: fade * (0.78 - f * 0.32) });
+    }
+    for (const [side, reach, hMul] of [[-1, 1.0, 1.05], [1, 1.0, 0.95], [-1, 0.62, 1.25], [1, 0.65, 1.18]]) {
+      for (let s = 1; s <= 4; s++) {
+        const sf = s / 4;
+        extraOps.push({ op: 'rect', x: Math.round(bx + side * (2 + sf * spread * reach)), y: Math.round(wy - Math.sin(sf * Math.PI * 0.88) * (curH * hMul) + sf * sf * 2.5), w: s === 1 ? 2 : 1, h: 1, c: s >= 3 ? '#ffffff' : '#bae6fd', a: fade * (0.95 - sf * 0.28) });
+      }
+    }
+    extraOps.push({ op: 'rect', x: bx - spread + 2, y: wy, w: Math.max(4, (spread - 2) * 2), h: 1, c: '#ffffff', a: fade * 0.92 });
+  }
+
+  // 2. Sleek Tapered Aerodynamic Slipstream Smear Ribbon + 2 clean parallel slipstream needles!
+  if (land.windTrail && land.windTrail.length >= 3) {
+    const layers = [
+      { maxW: 4.8, col: '#38bdf8', alpha: 0.34 },
+      { maxW: 2.8, col: '#bae6fd', alpha: 0.56 },
+      { maxW: 1.3, col: '#ffffff', alpha: 0.84 },
+    ];
+    for (const lay of layers) {
+      for (let i = 0; i < land.windTrail.length - 1; i++) {
+        const a = land.windTrail[i], b = land.windTrail[i + 1];
+        const uMid = (a.u + b.u) * 0.5;
+        const taper = Math.sin(clamp(uMid, 0.04, 1) * Math.PI * 0.82) * Math.pow(1 - uMid, 0.72);
+        const halfW = lay.maxW * taper;
+        if (halfW < 0.25) continue;
+        const steps = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 1.4));
+        const sz = Math.max(1, Math.round(halfW * 2));
+        for (let st2 = 0; st2 <= steps; st2++) {
+          const f = st2 / steps;
+          extraOps.push({ op: 'rect', x: Math.round(lerp(a.x, b.x, f) - sz * 0.5), y: Math.round(lerp(a.y, b.y, f) - sz * 0.5), w: sz, h: sz, c: lay.col, a: lay.alpha * (1 - uMid * 0.82) });
+        }
+      }
+    }
+    for (const side of [-1, 1]) {
+      for (let i = 1; i < Math.min(land.windTrail.length - 2, 8); i++) {
+        const a = land.windTrail[i], b = land.windTrail[i + 1];
+        extraOps.push({ op: 'line', x0: a.x + a.nx * side * 4.5, y0: a.y + a.ny * side * 4.5, x1: b.x + b.nx * side * 4.5, y1: b.y + b.ny * side * 4.5, c: i <= 3 ? '#ffffff' : '#bae6fd', a: (1 - a.u) * 0.70 });
+      }
+    }
+  }
+
+  // 3. Clean Curved Overhead Hat-Gust Swooshes!
+  if (land.hatGust > 0.08) {
+    const hgx = Math.round(rig.headX), hgy = Math.round(rig.headY - 6 - (rig.hatPopY || 0));
+    for (let i = 0; i < 2; i++) {
+      const y0 = hgy - 2 + i * 4;
       extraOps.push({
-        op: 'img', id: fishId, mode: gh.mode,
-        x: Math.round(gh.x - gg[0].length / 2),
-        y: Math.round(gh.y - gg.length / 2),
-        a: gh.alpha,
+        op: 'quad',
+        x0: hgx + 9 - i * 2, y0: y0 + 1,
+        cx: hgx + 1, cy: y0 - 2,
+        x1: hgx - 9 - i * 3, y1: y0 + 1,
+        c: i === 0 ? '#ffffff' : '#bae6fd',
+        a: clamp(land.hatGust * (0.82 - i * 0.22), 0, 0.85),
       });
     }
   }
 
-  // Sonic air-break shock ring + curved slipstream wind ribbons + hat gust!
-  if (land.sonicRing) {
-    const sr = land.sonicRing;
-    const sp2 = clamp(sr.progress, 0, 1);
-    const rx = lerp(3, 12, sp2), ry = lerp(6, 17, sp2);
-    for (let i = 0; i < 20; i++) {
-      const a = (i / 20) * Math.PI * 2;
-      extraOps.push({ op: 'rect', x: sr.x + Math.cos(a) * rx, y: sr.y + Math.sin(a) * ry, w: 1, h: 1, c: i % 2 === 0 ? '#ffffff' : '#bae6fd', a: (1 - sp2) * 0.9 });
-    }
-  }
-  if (land.windTrail && land.windTrail.length >= 4) {
-    const offs = [[-5, '#ffffff', 0.82], [0, '#bae6fd', 0.72], [5, '#38bdf8', 0.58]];
-    for (const [dy, col, a0] of offs) {
-      for (let i = 0; i < land.windTrail.length - 1; i++) {
-        const ptA = land.windTrail[i], ptB = land.windTrail[i + 1];
-        extraOps.push({ op: 'line', x0: ptA.x, y0: ptA.y + dy, x1: ptB.x, y1: ptB.y + dy, c: col, a: (1 - ptA.u) * a0 });
-      }
-    }
-  }
-  if (land.hatGust > 0.08) {
-    const hgx = Math.round(rig.headX), hgy = Math.round(rig.headY - 5 - (rig.hatPopY || 0));
-    for (let i = 0; i < 3; i++) {
-      extraOps.push({ op: 'line', x0: hgx + 7 - i * 2, y0: hgy - 2 + i * 3, x1: hgx - 4 - i * 2, y1: hgy - 1 + i * 3, c: i === 0 ? '#ffffff' : '#bae6fd', a: land.hatGust * 0.8 });
+  // 4. Rotated Speed Afterimage Ghosts during launch!
+  if (land.ghosts) {
+    for (let i = land.ghosts.length - 1; i >= 0; i--) {
+      const gh = land.ghosts[i];
+      extraOps.push({
+        op: 'rotImg', id: fishId, mode: gh.mode,
+        cx: gh.x, cy: gh.y, angle: gh.angle || 0, sx: gh.sx || 1, sy: gh.sy || 1,
+        a: gh.alpha, flash: false,
+      });
     }
   }
 
-  // Insane dock slam FX: billowing dust clouds + 10-ray crunch starburst + water crown!
+  // 5. Grounded rolling dust wisps behind/beside slammed fish
   if (land.impactFlash) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x), iy = Math.round(imp.y);
-    const wf = imp.wf ?? 0.35;
-    const maxR = imp.big ? (17 + wf * 15) : (10 + wf * 6);
-    const rad = Math.round(lerp(3, maxR, Math.pow(p, 0.7)));
-    extraOps.push({ op: 'rect', x: ix - rad, y: iy - 1, w: 4, h: 1, c: '#7dd3fc', a: clamp(1 - p, 0, 0.9) });
-    extraOps.push({ op: 'rect', x: ix + rad - 3, y: iy - 1, w: 4, h: 1, c: '#7dd3fc', a: clamp(1 - p, 0, 0.9) });
-    // Billowing pixel dust puffs left & right
-    const spread = lerp(3, maxR * 0.92, Math.pow(p, 0.65));
-    const lift = Math.sin(p * Math.PI * 0.85) * (imp.big ? 4.5 + wf * 2.5 : 2.5);
-    const pr = Math.max(1, Math.round((imp.big ? 3.8 + wf * 1.8 : 2.4) * (0.55 + 0.65 * Math.sin(p * Math.PI * 0.78))));
+    const wf2 = imp.wf ?? 0.35;
+    const hw = Math.max(6, Math.round(imp.halfW || 9));
+    const maxR = hw + (imp.big ? (11 + wf2 * 7) : (7 + wf2 * 4));
+    const spread = lerp(hw * 0.65, maxR * 0.92, Math.pow(p, 0.60));
+    const lift = Math.sin(p * Math.PI * 0.85) * (imp.big ? 2.6 + wf2 * 1.4 : 1.5);
+    const pr = Math.max(1, Math.round((imp.big ? 2.5 + wf2 * 1.1 : 1.7) * (0.65 + 0.45 * Math.sin(p * Math.PI * 0.75))));
     for (const side of [-1, 1]) {
-      const bx = ix + side * spread, by = iy - 1 - lift * 0.45;
-      for (const [ox, oy, lr] of [[0,0,pr*0.9],[-pr*0.6,pr*0.2,pr*0.62],[pr*0.6,pr*0.2,pr*0.62],[pr*0.15,-pr*0.4,pr*0.52]]) {
+      const bx = ix + side * spread, by = iy - lift * 0.4;
+      for (const [ox, oy, lr] of [[0,0,pr*0.9],[-pr*0.6,pr*0.2,pr*0.6],[pr*0.6,pr*0.2,pr*0.6],[pr*0.14,-pr*0.38,pr*0.52]]) {
         const cx = Math.round(bx + ox), cy = Math.round(by + oy), rr = Math.max(1, Math.round(lr));
         for (let dy = -rr; dy <= rr; dy++) {
           if (cy + dy > iy) continue;
           const spn = Math.floor(Math.sqrt(Math.max(0, rr * rr - dy * dy)));
-          extraOps.push({ op: 'rect', x: cx - spn, y: cy + dy, w: spn * 2 + 1, h: 1, c: dy < -rr * 0.2 ? '#fef9ef' : dy > rr * 0.35 ? '#947c62' : '#e2d5c3', a: clamp(1 - p * 0.8, 0.1, 0.88) });
+          extraOps.push({ op: 'rect', x: cx - spn, y: cy + dy, w: spn * 2 + 1, h: 1, c: dy < -rr * 0.18 ? '#fef9ef' : dy > rr * 0.38 ? '#a68c6e' : '#e2d5c3', a: clamp(1 - p * 0.82, 0.1, 0.86) });
         }
       }
     }
-    if (p < 0.68) {
-      const sp3 = p / 0.68;
-      const rl = Math.round(lerp(4, maxR * 0.92, Math.pow(sp3, 0.7)));
-      for (const [rx, ry, col] of [[-1,-0.18,'#ffffff'],[1,-0.18,'#ffffff'],[-0.88,-0.52,'#fde047'],[0.88,-0.52,'#fde047'],[-0.56,-0.84,'#fb923c'],[0.56,-0.84,'#fb923c'],[0,-1.05,'#ffffff']]) {
-        extraOps.push({ op: 'line', x0: ix + Math.round(rx * 2), y0: iy - 1 + Math.round(ry * 2), x1: ix + Math.round(rx * rl), y1: iy - 1 + Math.round(ry * rl), c: col, a: clamp(1 - sp3 * 0.85, 0.1, 1) });
+  }
+
+  // 6. Main fish sprite (smooth aerial rotation + velocity squash/stretch + white hitFlash + exact 0px flush grounding!)
+  const grid = getFishGrid(fishId, land.mode);
+  const imgW = grid[0].length;
+  const imgH = grid.length;
+  const fAng = land.angle || 0;
+  const fsx = land.squashX || 1;
+  const fsy = land.squashY || 1;
+  let lowestFishOpaqueY = -999;
+  let fishMinX = 9999, fishMaxX = -9999;
+
+  if (Math.abs(fAng) > 0.015) {
+    extraOps.push({ op: 'rotImg', id: fishId, mode: land.mode, cx: land.x, cy: land.y, angle: fAng, sx: fsx, sy: fsy, a: 1, flash: !!land.hitFlash });
+    const sw = imgW * fsx, sh = imgH * fsy;
+    const cos = Math.cos(fAng), sin = Math.sin(fAng);
+    const bw = Math.ceil(Math.abs(sw * cos) + Math.abs(sh * sin)) + 2;
+    const bh = Math.ceil(Math.abs(sw * sin) + Math.abs(sh * cos)) + 2;
+    const x0 = Math.floor(land.x - bw / 2), y0 = Math.floor(land.y - bh / 2);
+    for (let py = y0; py <= y0 + bh; py++) {
+      for (let px = x0; px <= x0 + bw; px++) {
+        const dx = px - land.x, dy = py - land.y;
+        const rx = (dx * cos + dy * sin) / fsx + imgW * 0.5;
+        const ry = (-dx * sin + dy * cos) / fsy + imgH * 0.5;
+        const rxi = Math.floor(rx), ryi = Math.floor(ry);
+        if (rxi < 0 || rxi >= imgW || ryi < 0 || ryi >= imgH) continue;
+        if (grid[ryi][rxi] === '.') continue;
+        if (py > lowestFishOpaqueY) lowestFishOpaqueY = py;
+        if (px < fishMinX) fishMinX = px;
+        if (px > fishMaxX) fishMaxX = px;
+        fishPx.add(`${px},${py}`);
+      }
+    }
+  } else {
+    const dw = Math.max(1, Math.round(imgW * fsx));
+    const dh = Math.max(1, Math.round(imgH * fsy));
+    const ix = Math.round(land.x - dw / 2);
+    let iy = Math.round(land.y - dh / 2);
+    const maxOpaqueIy = g.pierY + 1 + Math.round((land.activePad || 0) * fsy) - dh;
+    if (ix <= g.pierEndX + 1 && iy > maxOpaqueIy) iy = maxOpaqueIy;
+    extraOps.push({ op: 'img', id: fishId, mode: land.mode, x: ix, y: iy, dw, dh, a: 1, flash: !!land.hitFlash });
+    for (let ry = 0; ry < dh; ry++) {
+      const sy2 = Math.min(imgH - 1, Math.floor((ry / dh) * imgH));
+      for (let rx = 0; rx < dw; rx++) {
+        const sx2 = Math.min(imgW - 1, Math.floor((rx / dw) * imgW));
+        if (grid[sy2][sx2] === '.') continue;
+        const wy = iy + ry, wx = ix + rx;
+        if (wy > lowestFishOpaqueY) lowestFishOpaqueY = wy;
+        if (wx < fishMinX) fishMinX = wx;
+        if (wx > fishMaxX) fishMaxX = wx;
+        fishPx.add(`${wx},${wy}`);
       }
     }
   }
 
-  // Main fish sprite (EXACT FLUSH GROUNDING on pierY!)
-  const grid = getFishGrid(fishId, land.mode);
-  const imgW = grid[0].length;
-  const imgH = grid.length;
-  const ix = Math.round(land.x - imgW / 2);
-  let iy = Math.round(land.y - imgH / 2);
-  const maxOpaqueIy = g.pierY + 1 + (land.activePad || 0) - imgH;
-  if (ix <= g.pierEndX + 1 && iy > maxOpaqueIy) iy = maxOpaqueIy;
-  extraOps.push({ op: 'img', id: fishId, mode: land.mode, x: ix, y: iy, a: 1 });
-
-  let lowestFishOpaqueY = -999;
-  for (let ry = 0; ry < imgH; ry++) {
-    for (let rx = 0; rx < imgW; rx++) {
-      const ch = grid[ry][rx];
-      if (ch === '.') continue;
-      const wy = iy + ry;
-      if (wy > lowestFishOpaqueY) lowestFishOpaqueY = wy;
-      fishPx.add(`${ix + rx},${wy}`);
+  // 6b. Foreground Punchy Dock Slam Burst (framing OUTSIDE the fish silhouette!)
+  if (land.impactFlash) {
+    const imp = land.impactFlash;
+    const p = clamp(imp.progress, 0, 1);
+    const ix = Math.round(imp.x), iy = Math.round(imp.y);
+    const wf2 = imp.wf ?? 0.35;
+    const hw = Math.max(6, Math.round(imp.halfW || 9));
+    const maxR = hw + (imp.big ? (11 + wf2 * 7) : (7 + wf2 * 4));
+    if (p < 0.40) {
+      const fp = p / 0.40;
+      const fw = Math.round(lerp(hw * 1.4, maxR * 1.5, fp));
+      extraOps.push({ op: 'rect', x: Math.max(1, ix - Math.floor(fw / 2)), y: iy, w: fw, h: 1, c: fp < 0.35 ? '#ffffff' : '#fde047', a: (1 - fp) * 0.95 });
+    }
+    if (p < 0.75) {
+      const dp = p / 0.75;
+      const rx = lerp(hw * 0.85, maxR, Math.pow(dp, 0.58));
+      const ry = lerp(Math.max(5, imgH * 0.45), Math.max(9, imgH * 0.65) + wf2 * 5, Math.pow(dp, 0.62));
+      for (let i = 0; i <= 18; i++) {
+        const a = Math.PI + (i / 18) * Math.PI;
+        const px = Math.round(ix + Math.cos(a) * rx), py = Math.round(iy + Math.sin(a) * ry);
+        if (py <= iy) extraOps.push({ op: 'rect', x: px, y: py, w: 1, h: 1, c: dp < 0.28 ? '#ffffff' : dp < 0.58 ? '#fde047' : '#7dd3fc', a: (1 - dp) * 0.90 });
+      }
+    }
+    if (imp.big && p < 0.38) {
+      const wp = p / 0.38;
+      const innerR = hw * 0.72 + wp * 4;
+      const outerR = innerR + lerp(7, 13 + wf2 * 4, Math.pow(wp, 0.6));
+      for (const [dx2, dy2] of [[-0.98,-0.22],[-0.75,-0.68],[-0.30,-0.95],[0.30,-0.95],[0.75,-0.68],[0.98,-0.22]]) {
+        const x1 = ix + Math.round(dx2 * innerR), y1 = iy - 2 + Math.round(dy2 * innerR * 0.62);
+        const x2 = ix + Math.round(dx2 * outerR), y2 = iy - 2 + Math.round(dy2 * outerR * 0.78);
+        extraOps.push({ op: 'line', x0: x1, y0: y1, x1: x2, y1: y2, c: wp < 0.35 ? '#ffffff' : '#fde047', a: clamp(1 - wp * 0.82, 0.15, 1) });
+        if (wp < 0.55) extraOps.push({ op: 'line', x0: x1, y0: y1 - 1, x1: x2, y1: y2, c: '#fb923c', a: clamp(1 - wp * 0.85, 0.12, 0.9) });
+      }
     }
   }
 
-  // Dizzy stars over stunned fish on back of dock
+  // 7. Crisp Bow-Wave Aerodynamic Crescent right in front of the flying fish!
+  if (land.bowWave) {
+    const bw = land.bowWave;
+    for (let i = 0; i <= 11; i++) {
+      const f = (i / 11) * 2 - 1;
+      const ang = bw.velAngle + f * 0.88;
+      const bx = Math.round(bw.x + Math.cos(ang) * bw.radius * 0.55 - Math.cos(bw.velAngle) * bw.radius * 0.45);
+      const by = Math.round(bw.y + Math.sin(ang) * bw.radius * 0.55 - Math.sin(bw.velAngle) * bw.radius * 0.45);
+      extraOps.push({ op: 'rect', x: bx, y: by, w: Math.abs(f) < 0.35 ? 2 : 1, h: 1, c: Math.abs(f) < 0.45 ? '#ffffff' : '#bae6fd', a: bw.alpha * (1 - Math.abs(f) * 0.65) });
+    }
+  }
+
+  // 8. Dizzy stars over stunned fish on back of dock
   if (land.showDizzyStars) {
     const sx0 = land.x + (land.mode === 'right' ? imgW * 0.25 : -imgW * 0.25);
-    const sy0 = Math.max(4, iy - 4);
+    const sy0 = Math.max(4, Math.round(land.y - imgH * 0.5) - 4);
     for (let i = 0; i < 3; i++) {
       const a = g.time * 5.4 + i * ((Math.PI * 2) / 3);
       const ox = Math.round(sx0 + Math.cos(a) * 6.5);
@@ -346,8 +458,7 @@ export function rasterizeFrame(fishId, st) {
     if (pierPx.has(k)) pierNoclips.push(k);
   }
 
-  const fishMinX = ix;
-  const fishMaxX = ix + imgW - 1;
+  if (fishMinX > fishMaxX) { fishMinX = Math.round(land.x - imgW / 2); fishMaxX = fishMinX + imgW - 1; }
   const backDockVisible = (t >= 0.56 || isCaught)
     ? (fishMinX >= 0 && fishMaxX < Math.round(rig.backFootX - 1))
     : true;
@@ -490,11 +601,38 @@ export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap 
           } else if (op.op === 'img') {
             const grid = getFishGrid(op.id, op.mode);
             const a = op.a ?? 1;
-            for (let ry = 0; ry < grid.length; ry++) {
-              for (let rx = 0; rx < grid[ry].length; rx++) {
-                const ch = grid[ry][rx];
+            const dw = op.dw || grid[0].length;
+            const dh = op.dh || grid.length;
+            for (let ry = 0; ry < dh; ry++) {
+              const sy2 = Math.min(grid.length - 1, Math.floor((ry / dh) * grid.length));
+              for (let rx = 0; rx < dw; rx++) {
+                const sx2 = Math.min(grid[0].length - 1, Math.floor((rx / dw) * grid[0].length));
+                const ch = grid[sy2][sx2];
                 if (ch === '.') continue;
-                putCell(ox, oy, Math.round(op.x) + rx, Math.round(op.y) + ry, hexRgb(PALETTE[ch]), a);
+                const rgb = op.flash ? [255, 255, 255] : hexRgb(PALETTE[ch]);
+                putCell(ox, oy, Math.round(op.x) + rx, Math.round(op.y) + ry, rgb, a);
+              }
+            }
+          } else if (op.op === 'rotImg') {
+            const grid = getFishGrid(op.id, op.mode);
+            const a = op.a ?? 1;
+            const w = grid[0].length, h = grid.length;
+            const sx = op.sx || 1, sy = op.sy || 1;
+            const cos = Math.cos(op.angle || 0), sin = Math.sin(op.angle || 0);
+            const bw = Math.ceil(Math.abs(w * sx * cos) + Math.abs(h * sy * sin)) + 2;
+            const bh = Math.ceil(Math.abs(w * sx * sin) + Math.abs(h * sy * cos)) + 2;
+            const x0 = Math.floor(op.cx - bw / 2), y0 = Math.floor(op.cy - bh / 2);
+            for (let py = y0; py <= y0 + bh; py++) {
+              for (let px = x0; px <= x0 + bw; px++) {
+                const dx = px - op.cx, dy = py - op.cy;
+                const rx = (dx * cos + dy * sin) / sx + w * 0.5;
+                const ry = (-dx * sin + dy * cos) / sy + h * 0.5;
+                const rxi = Math.floor(rx), ryi = Math.floor(ry);
+                if (rxi < 0 || rxi >= w || ryi < 0 || ryi >= h) continue;
+                const ch = grid[ryi][rxi];
+                if (ch === '.') continue;
+                const rgb = op.flash ? [255, 255, 255] : hexRgb(PALETTE[ch]);
+                putCell(ox, oy, px, py, rgb, a);
               }
             }
           }

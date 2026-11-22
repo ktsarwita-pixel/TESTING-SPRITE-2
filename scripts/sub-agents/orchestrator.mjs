@@ -613,6 +613,7 @@ async function runScreenshotterAction() {
   const species = ['minnow', 'snapper', 'tuna', 'leviathan', 'krakentitan'];
   const ts = [0.08, 0.20, 0.36, 0.48, 0.57, 0.68, 0.82, 1.0];
   const out = renderScreenshotSheet('/tmp/subagent_action_sheet.png', species, ts, { heatmap: false, scale: 2 });
+    renderScreenshotSheet('/tmp/subagent_flight_strip.png', ['snapper', 'tuna', 'krakentitan'], [0.16, 0.22, 0.28, 0.34, 0.40, 0.46, 0.52, 0.565, 0.61, 0.68, 0.76, 1.0], { heatmap: false, scale: 2 });
   const ok = fs.existsSync(out.outPath) && fs.statSync(out.outPath).size > 2000;
   return {
     agent: 'screenshotter-action',

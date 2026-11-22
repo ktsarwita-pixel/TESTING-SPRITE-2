@@ -327,6 +327,8 @@ export function buildSpriteCache() {
       flip: frames.map((rows) => makeCanvasFromRows(rows, { rotateMode: '180' })),
       silRight: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false, silhouetteColor: '#0e243d' })),
       silLeft: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true, silhouetteColor: '#0e243d' })),
+      flashRight: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false, silhouetteColor: '#ffffff' })),
+      flashLeft: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true, silhouetteColor: '#ffffff' })),
       logSil: makeCanvasFromRows(frames[0], { flipX: false, silhouetteColor: '#1e293b' }),
       w,
       h,
