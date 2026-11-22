@@ -1069,6 +1069,44 @@ class SoundEngine {
     this._acousticNote(784.0, 0.26, 0.065, 0.17, 'harp', -0.2);
   }
 
+  // Supersonic over-reel launch WHOOSH + comical rising pitch zip as fish rockets over the angler's hat!
+  playOverReelLaunch(wf = 0.35, pan = -0.25) {
+    if (!this._ready()) return;
+    // Explosive carbon rod whip + supersonic air swoosh
+    this._filteredNoise({
+      dur: 0.28 + wf * 0.08, vol: 0.24 + wf * 0.08, pink: true,
+      filterType: 'bandpass', freqStart: 420, freqEnd: 2900 - wf * 600, q: 2.2, attack: 0.015, wet: 0.28, pan,
+    });
+    // Rising cartoon ballistic zip-whistle!
+    this._osc(310 - wf * 70, 960 - wf * 240, 0.22, 'triangle', 0.085, 0.01, 0.22, 0.012, pan);
+    // Metallic line-ping release zing!
+    this._metalClick(3600 - wf * 450, 0.09, 0.015, 0.025, pan);
+  }
+
+  // Heavy wet fish SLAP + hollow resonant dock plank SLAM (biome material-matched!)
+  playDockSlam(wf = 0.35, bounceIdx = 0, pan = -0.55) {
+    if (!this._ready()) return;
+    const scale = bounceIdx === 0 ? 1.0 : bounceIdx === 1 ? 0.62 : 0.38;
+    const pitchBoost = 1 + bounceIdx * 0.24;
+    // Deep wooden/stone pier impact thump
+    this._osc((132 - wf * 38) * pitchBoost, (44 - wf * 10) * pitchBoost, 0.20 * scale + 0.06, 'sine', (0.26 + wf * 0.12) * scale, 0, 0.26, 0.002, pan);
+    // Biome-specific pier plank/stone resonance!
+    this._materialTap((220 - wf * 45) * pitchBoost, (0.20 + wf * 0.08) * scale, 0.003, null, pan);
+    // Juicy wet fish slap transient!
+    this._filteredNoise({
+      dur: 0.14 * scale + 0.05, vol: (0.24 + wf * 0.08) * scale, pink: false,
+      filterType: 'bandpass', freqStart: 1650 * pitchBoost, freqEnd: 460, q: 1.5, attack: 0.002, wet: 0.24, pan,
+    });
+    if (bounceIdx === 0) {
+      this.playPierCreak();
+      // Subtle bucket/tacklebox rattle on big impact!
+      if (wf > 0.25) {
+        this._metalClick(2650, 0.055 * (0.5 + wf * 0.5), 0.04, 0.018, pan - 0.1);
+        this._metalClick(1980, 0.045 * (0.5 + wf * 0.5), 0.09, 0.016, pan - 0.15);
+      }
+    }
+  }
+
   // ── Predator Ambush & World Events ────────────────────────────────────────
   playAmbushAlert(pan = 0.25, depth = 0.55) {
     if (this._playSample('ambush_alert', 0.88, 0.05, 1.0, 0.22, pan, depth)) return;

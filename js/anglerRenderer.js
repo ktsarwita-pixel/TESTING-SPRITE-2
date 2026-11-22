@@ -129,31 +129,52 @@ export function computeAnglerRig(g) {
   const shoulderX = hipX + lean * 0.68;
   const shoulderY = hipY - 8.4 + breath * 0.55;
 
-  // Dynamic head-tracking & gaze follow (watches water breach -> tracks arcing fish -> proud lift on catch!)
+  // Dynamic head-tracking, panic hat-pop & over-the-shoulder lookback during Over-Reel Back-of-Dock Launch!
   let headTrackX = 0;
   let headTrackY = 0;
+  let hatPopY = 0;
+  let lookBack = false;
+  let expr = 'normal';
   if (g.state === 'LANDING') {
     const lt = clamp(g.landingT || 0, 0, 1);
-    if (lt < 0.38) {
-      // Focused forward-down gaze watching the fish break out of the waves
-      const p = smoothstep(lt / 0.38);
-      headTrackX = lerp(0.1, 0.45, p);
-      headTrackY = lerp(0.1, 0.35, p);
-    } else if (lt < 0.62) {
-      // Head lifts subtly tracking the fish arcing cleanly across the pier air
-      const p = smoothstep((lt - 0.38) / 0.24);
-      headTrackX = lerp(0.45, 0.55, p);
-      headTrackY = lerp(0.35, -0.45, Math.sin(p * Math.PI));
+    const wfl = g.landingWeightFactor ?? 0.35;
+    if (lt < 0.22) {
+      // Beat 1: TURBO OVER-REEL YANK — intense strain leaning back watching the water explode!
+      const p = smoothstep(lt / 0.22);
+      headTrackX = lerp(0.1, -0.35, p);
+      headTrackY = lerp(0.1, 0.25, p);
+      expr = 'strain';
+    } else if (lt < 0.56) {
+      // Beat 2: SUPERSONIC OVERHEAD FLYBY — duck low, look up/back as fish zooms over hat, HAT POPS UP!
+      const p = smoothstep((lt - 0.22) / 0.34);
+      headTrackX = lerp(-0.35, -0.65, p);
+      headTrackY = -0.45 * Math.sin(p * Math.PI);
+      if (lt >= 0.28 && lt <= 0.52) {
+        hatPopY = Math.sin(((lt - 0.28) / 0.24) * Math.PI) * (2.4 + wfl * 1.1);
+      }
+      lookBack = lt >= 0.42;
+      expr = 'shock';
+    } else if (lt < 0.85) {
+      // Beat 3 & 4: EARTH-SHATTERING DOCK SLAM — flinch jolt + wide-eyed lookback at back of dock!
+      const jolt = Math.exp(-Math.pow((lt - 0.57) / 0.045, 2)) * (0.9 + wfl * 0.6);
+      headTrackX = -0.55;
+      headTrackY = -jolt;
+      hatPopY = jolt * 1.2;
+      lookBack = true;
+      expr = 'shock';
     } else {
-      // Catch impact nod followed by proud upright trophy gaze
-      const p = smoothstep((lt - 0.62) / 0.38);
-      const impactNod = Math.exp(-Math.pow((lt - 0.64) / 0.06, 2)) * 0.55;
-      headTrackX = lerp(0.55, 0.25, p);
-      headTrackY = impactNod - p * 0.25;
+      // Beat 5: Settle into hilarious proud-yet-sheepish grin looking back at flopping fish!
+      const p = smoothstep((lt - 0.85) / 0.15);
+      headTrackX = lerp(-0.55, -0.45, p);
+      headTrackY = lerp(0, -0.2, p);
+      lookBack = true;
+      expr = 'happy';
     }
   } else if (g.state === 'CAUGHT') {
-    headTrackX = 0.25;
-    headTrackY = -0.25;
+    headTrackX = -0.45;
+    headTrackY = -0.2;
+    lookBack = true;
+    expr = 'happy';
   }
 
   // Head sits seamlessly on top of the neck & spine (zero floating gap even on full lean-back!)
@@ -165,7 +186,7 @@ export function computeAnglerRig(g) {
   const sinA = Math.sin(rodAngle);
 
   const wf = g.landingWeightFactor ?? 0.35;
-  const twoHandCatch = false; // Clean iconic silhouette: back hand rests rod over rear shoulder, front arm proudly extends fish clear of body & face!
+  const twoHandCatch = false;
   let gripX, gripY, reelX, reelY;
   let catchHoldX = shoulderX + 13.5;
   let catchHoldY = shoulderY + 0.5;
@@ -174,118 +195,60 @@ export function computeAnglerRig(g) {
   if (g.state === 'CAUGHT' || g.state === 'LANDING') {
     const t = g.state === 'CAUGHT' ? 1 : clamp(g.landingT || 0, 0, 1);
 
-    // Beat 1 (0..0.42): smooth natural rod heave starting from exact REELING hand offsets (0.00px snap!)
+    // Beat 1 (0..0.22): Explosive over-reel power yank starting from exact REELING hand offsets (0.00px snap!)
     const initGDX = Number.isFinite(g.landingInitGripDX) ? g.landingInitGripDX : 5.6;
     const initGDY = Number.isFinite(g.landingInitGripDY) ? g.landingInitGripDY : 1.2;
     const initRDX = Number.isFinite(g.landingInitReelDX) ? g.landingInitReelDX : (initGDX - cosA * 3.0);
     const initRDY = Number.isFinite(g.landingInitReelDY) ? g.landingInitReelDY : (initGDY - sinA * 3.0 + 0.4);
-    const heaveP = smoothstep(clamp(t / 0.38, 0, 1));
-    const heaveGX = lerp(shoulderX + initGDX, shoulderX + 4.4, heaveP);
-    const heaveGY = lerp(shoulderY + initGDY, shoulderY - 1.0 - wf * 0.5, heaveP);
-    const heaveRX = lerp(shoulderX + initRDX, shoulderX + 2.6, heaveP);
-    const heaveRY = lerp(shoulderY + initRDY, shoulderY + 1.3 + wf * 0.3, heaveP);
+    const yankP = smoothstep(clamp(t / 0.22, 0, 1));
+    const yankGX = lerp(shoulderX + initGDX, shoulderX + 2.8, yankP);
+    const yankGY = lerp(shoulderY + initGDY, shoulderY - 2.4 - wf * 0.5, yankP);
+    const yankRX = lerp(shoulderX + initRDX, shoulderX + 1.4, yankP);
+    const yankRY = lerp(shoulderY + initRDY, shoulderY - 0.5, yankP);
 
-    // Outstretched NEAR/FRONT hand (reelX, reelY) anticipates, catches with realistic weight cushion, then lifts proudly!
-    // Back/FAR hand (gripX, gripY) NEVER lets go of the rod — smoothly tucks it behind the rear shoulder!
-    const catchDip = g.state === 'LANDING'
-      ? Math.exp(-Math.pow((t - 0.62) / 0.075, 2)) * (0.65 + wf * 1.35)
-      : 0;
-    const anticipateLift = g.state === 'LANDING'
-      ? Math.exp(-Math.pow((t - 0.54) / 0.055, 2)) * 0.75
-      : 0;
+    // Back hand keeps holding the rod cleanly behind the rear shoulder after the mega yank!
+    const rodRestX = shoulderX - 3.4;
+    const rodRestY = shoulderY + 2.0;
 
-    // Lively intermittent fish wriggle/flop bursts in CAUGHT (natural wet fish energy, never robotic sine!)
+    // Front hand: raises defensively near chest/collar during overhead flyby -> points cleanly back at dock below chin!
+    const duckHandX = shoulderX + 2.2;
+    const duckHandY = shoulderY - 0.8;
     const ct = g.state === 'CAUGHT' ? (g.catchTime || 0) : 0;
-    const initialFlop = g.state === 'CAUGHT' ? Math.exp(-ct * 3.4) * Math.sin(ct * 26) * (0.45 + wf * 0.35) : 0;
-    const burstPhase = (ct + 0.6) % 2.3;
-    const flopBurst = g.state === 'CAUGHT' && ct > 0.7 && burstPhase < 0.32
-      ? Math.sin((burstPhase / 0.32) * Math.PI) * Math.sin(burstPhase * 42) * 0.55
-      : 0;
-    const calmBob = g.state === 'CAUGHT' ? Math.sin(ct * 3.2) * 0.55 : 0;
-    const fishWriggleY = calmBob + initialFlop + flopBurst;
+    const cheerBob = g.state === 'CAUGHT' ? Math.sin(ct * 4.5) * 0.45 : 0;
+    const pointBackX = shoulderX - 5.4;
+    const pointBackY = shoulderY + 1.6 + cheerBob;
 
-    // Zero-noclip realistic fisherman dual-hold system (ZERO tail-holding, ZERO body/pier clipping!):
-    //   'hang'     (sprW <= 25): 1-Hand Vertical MOUTH/LIP Hold (fish hangs straight down by gravity, clear of torso & pier!)
-    //   'gillHold' (sprW >  25): 1-Hand HEAD/GILL-PLATE Hold (dir=-1, head on LEFT in hand, body extending OUT over open water!)
-    const fishObj = g.state === 'CAUGHT'
-      ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
-      : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]);
-    const sprW = fishObj ? (fishObj.w || (fishObj.right && fishObj.right[0] ? fishObj.right[0].width : 20)) : 20;
-    const sprH = fishObj ? (fishObj.h || (fishObj.right && fishObj.right[0] ? fishObj.right[0].height : 13)) : 13;
-    const holdMode = sprW <= 25 ? 'hang' : 'gillHold';
-
-    const raiseP = g.state === 'CAUGHT'
-      ? 1
-      : t <= 0.62
-        ? 0
-        : smoothstep(clamp((t - 0.62) / 0.38, 0, 1));
-
-    let handMeetX, handMeetY, handProudX, handProudY;
-    if (holdMode === 'hang') {
-      // Raised front hand holding fish cleanly by its TOP MOUTH/LIP (high enough that even 25px tail clears pier!)
-      const extraLift = Math.max(0, (sprW - 18) * 0.22);
-      handMeetX = shoulderX + 6.2 + anticipateLift * 0.3;
-      handMeetY = shoulderY - 1.0 - extraLift * 0.6 - anticipateLift * 0.5 + catchDip * 0.5;
-      handProudX = shoulderX + 6.4;
-      handProudY = shoulderY - 2.1 - extraLift + calmBob * 0.4;
-    } else {
-      // Outstretched strong front hand gripping underneath the giant fish's JAW / GILL-PLATE (dir=-1, clear of body & pier!)
-      const tallLift = sprH > 20 ? 1.8 : 0;
-      handMeetX = shoulderX + 6.6 + anticipateLift * 0.35;
-      handMeetY = shoulderY + 1.8 - tallLift - anticipateLift * 0.6 + catchDip * 0.75;
-      handProudX = shoulderX + 6.8;
-      handProudY = shoulderY + 0.8 - tallLift + wf * 0.3 + fishWriggleY * 0.5;
-    }
-
-    const holdHandX = lerp(handMeetX, handProudX, raiseP);
-    const holdHandY = lerp(handMeetY, handProudY, raiseP);
-
-    // Guaranteed body clearance boundary (strictly to the RIGHT of head, hat, vest, and front boot!)
-    const bodySafeX = Math.max(shoulderX + 4.4, headX + 3.6);
-
-    if (holdMode === 'hang') {
-      // Vertical hang: mouth at TOP gripped by hand (or 2-3px taut mouth-leader for wide/spiky fish),
-      // left edge strictly >= bodySafeX (0 body noclip!) and tail tip strictly <= groundY - 2 (0 pier noclip!)
-      const swayX = g.state === 'CAUGHT' ? Math.sin(ct * 3.1) * 0.45 + (initialFlop + flopBurst) * 0.75 : 0;
-      const mouthInset = Math.min(2.2, sprW * 0.11);
-      const minCenterX = bodySafeX + sprH * 0.5 + 0.6;
-      catchHoldX = Math.max(holdHandX + 1.2, minCenterX) + Math.max(0, swayX);
-      const maxCenterY = groundY - sprW * 0.5 - 2.0; // strictly above pier planks (groundY)!
-      catchHoldY = Math.min(maxCenterY, holdHandY + sprW * 0.5 - mouthInset);
-    } else {
-      // Giant fish faces LEFT (dir=-1): HEAD/MOUTH/GILL is on the LEFT right inside the outstretched hand,
-      // while its long body & tail extend cleanly OUT OVER OPEN WATER to the right (0 body noclip, 0 pier noclip!)
-      const minCenterX = bodySafeX + sprW * 0.5 + 0.6;
-      catchHoldX = Math.max(holdHandX + sprW * 0.5 - 3.0, minCenterX);
-      const maxCenterY = groundY - sprH * 0.5 - 2.0; // strictly above pier planks!
-      catchHoldY = Math.min(maxCenterY, holdHandY - 0.5 + (g.state === 'CAUGHT' ? (initialFlop + flopBurst) * 0.4 : 0));
-    }
-
-    // Back hand resting position behind the rear shoulder (cozy ~5.0px reach from backShoulder!)
-    const rodRestX = shoulderX - 3.6;
-    const rodRestY = shoulderY + 2.2;
-
-    if (t < 0.38) {
-      gripX = heaveGX;
-      gripY = heaveGY;
-      reelX = heaveRX;
-      reelY = heaveRY;
+    if (t < 0.22) {
+      gripX = yankGX;
+      gripY = yankGY;
+      reelX = yankRX;
+      reelY = yankRY;
       tuck = 0;
-    } else if (t < 0.62) {
-      // Smooth non-crossing choreography: back hand tucks rod behind shoulder, front hand reaches out to catch fish!
-      const swP = smoothstep((t - 0.38) / 0.24);
-      tuck = swP;
-      gripX = lerp(heaveGX, rodRestX, swP);
-      gripY = lerp(heaveGY, rodRestY, swP);
-      reelX = lerp(heaveRX, holdHandX, swP);
-      reelY = lerp(heaveRY, holdHandY, swP);
+    } else if (t < 0.56) {
+      // Beat 2: Rod whips behind rear shoulder while front hand shields hat as fish zooms overhead!
+      const flyP = smoothstep((t - 0.22) / 0.34);
+      tuck = flyP;
+      gripX = lerp(yankGX, rodRestX, flyP);
+      gripY = lerp(yankGY, rodRestY, flyP);
+      reelX = lerp(yankRX, duckHandX, flyP);
+      reelY = lerp(yankRY, duckHandY, flyP);
+    } else if (t < 0.85) {
+      // Beat 3 & 4: Fish slams onto back of dock — front arm swings back gesturing toward the dock chaos!
+      const reactP = smoothstep((t - 0.56) / 0.29);
+      tuck = 1;
+      gripX = rodRestX;
+      gripY = rodRestY;
+      reelX = lerp(duckHandX, pointBackX, reactP);
+      reelY = lerp(duckHandY, pointBackY, reactP);
     } else {
       tuck = 1;
       gripX = rodRestX;
       gripY = rodRestY;
-      reelX = holdHandX;
-      reelY = holdHandY;
+      reelX = pointBackX;
+      reelY = pointBackY;
     }
+    catchHoldX = g.pierEndX ? g.pierEndX * 0.27 : (g.anglerX - 24);
+    catchHoldY = groundY - 8;
   } else if (g.state === 'IDLE') {
     // Relaxed, natural two-hand ready grip cleanly spaced along the cork rod handle
     gripX = shoulderX + 6.4;
@@ -359,17 +322,16 @@ export function computeAnglerRig(g) {
     shoulderY,
     headX,
     headY,
+    hatPopY,
+    lookBack,
+    expr,
     gripX,
     gripY,
     reelX,
     reelY,
     catchHoldX,
     catchHoldY,
-    holdMode: (g.state === 'CAUGHT' || g.state === 'LANDING')
-      ? (((g.state === 'CAUGHT'
-          ? (g.lastCatchInfo && g.sprites && g.sprites.fish[g.lastCatchInfo.species.id])
-          : (g.activeFish && g.sprites && g.sprites.fish[g.activeFish.species.id]))?.w || 20) <= 25 ? 'hang' : 'gillHold')
-      : null,
+    holdMode: (g.state === 'CAUGHT' || g.state === 'LANDING') ? 'backDock' : null,
     twoHandCatch,
     tuck,
     rodHandX,
@@ -467,68 +429,102 @@ function drawSculptedTorso(ctx, rig) {
   px(ctx, pX, pY, '#1a5c58', 2, 1);
 }
 
-// Sculpted non-blocky head, layered chestnut hair, expressive face, and curved woven straw hat!
+// Sculpted non-blocky head, layered chestnut hair, expressive face (forward & lookBack!), and curved woven straw hat!
 function drawSculptedHeadAndHat(ctx, g, rig) {
   const hx = Math.round(rig.headX);
   const hy = Math.round(rig.headY);
+  const lookBack = Boolean(rig.lookBack);
+  const expr = rig.expr || 'normal';
 
   // Solid warm neck seamlessly bridging chin straight into the crimson bandana collar (ZERO gap!)
   drawPixelLineLocal(ctx, hx - 1, hy + 2, rig.shoulderX - 1, rig.shoulderY, '#b57451');
   drawPixelLineLocal(ctx, hx, hy + 2, rig.shoulderX, rig.shoulderY, '#e0a27b');
   drawPixelLineLocal(ctx, hx + 1, hy + 2, rig.shoulderX + 1, rig.shoulderY, '#f2ba91');
 
-  // Chamfered organic head silhouette (NO flat 7x6 rectangle!)
-  // Row hy-2 (forehead), hy-1 (brow/eye), hy (cheek/nose), hy+1 (mouth/jaw), hy+2 (tapered chin)
-  px(ctx, hx - 3, hy - 1, '#5e3420', 1, 3); // back hair rim
-  px(ctx, hx - 2, hy - 2, '#7d4628', 4, 1); // upper hair under hat
-  px(ctx, hx - 2, hy - 1, '#995732', 2, 2); // hair sideburn/lock
-  px(ctx, hx - 2, hy + 1, '#7d4628', 1, 1); // nape hair
-
-  // Warm sculpted face profile
-  px(ctx, hx, hy - 1, '#f7c8a4', 3, 1);     // brow
-  px(ctx, hx - 1, hy, '#f7c8a4', 4, 1);     // cheek + slight nose bridge!
-  px(ctx, hx, hy - 1, '#ffe4cc', 1, 1);     // forehead sunlit catchlight
-  px(ctx, hx + 3, hy, '#e8a882', 1, 1);     // gentle 1px nose tip!
-  px(ctx, hx - 1, hy + 1, '#f2b88f', 3, 1); // lower cheek
-  px(ctx, hx, hy + 2, '#d4936a', 2, 1);     // tapered rounded chin (no boxy jaw!)
-  // Warm ear pixel
-  px(ctx, hx - 1, hy, '#e6a882', 1, 1);
-
-  // Expressive CRISP ALWAYS-VISIBLE EYE on row hy-1 (NEVER disappears into hair!)
   const blinking = (g.time % 4.6) > 4.48 && g.state === 'IDLE';
   const straining =
-    (g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72)) ||
-    (g.state === 'LANDING' && (g.landingT || 0) < 0.38);
-  const happy = g.state === 'CAUGHT' || (g.state === 'LANDING' && (g.landingT || 0) >= 0.62);
+    expr === 'strain' ||
+    (g.state === 'REELING' && (g.fishThrashing || (g.tension || 0) > 0.72));
+  const shocked = expr === 'shock';
+  const happy = expr === 'happy' || g.state === 'CAUGHT';
 
-  if (blinking) {
-    // Brief natural idle blink right on the eye row
-    px(ctx, hx + 1, hy - 1, '#3b1e11', 2, 1);
-  } else if (happy) {
-    // Bright sparkling joyful eye right on row hy-1 (100% readable!) + happy warm grin + rosy cheek
-    px(ctx, hx + 1, hy - 1, '#ffffff', 1, 1);
-    px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
-    px(ctx, hx, hy, '#eb8a78', 1, 1);      // rosy happy cheek
-    px(ctx, hx + 1, hy + 1, '#b54d3e', 2, 1); // crisp celebratory smile
-  } else if (straining) {
-    // Determined focused eye right on row hy-1 (crisp white + dark pupil, furrowed brow glint)
-    px(ctx, hx + 1, hy - 1, '#fff5eb', 1, 1);
-    px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
-    px(ctx, hx + 1, hy + 1, '#a85745', 1, 1);
+  if (!lookBack) {
+    // Chamfered organic RIGHT-facing head silhouette
+    px(ctx, hx - 3, hy - 1, '#5e3420', 1, 3); // back hair rim
+    px(ctx, hx - 2, hy - 2, '#7d4628', 4, 1); // upper hair under hat
+    px(ctx, hx - 2, hy - 1, '#995732', 2, 2); // hair sideburn/lock
+    px(ctx, hx - 2, hy + 1, '#7d4628', 1, 1); // nape hair
+
+    // Warm sculpted face profile
+    px(ctx, hx, hy - 1, '#f7c8a4', 3, 1);     // brow
+    px(ctx, hx - 1, hy, '#f7c8a4', 4, 1);     // cheek + slight nose bridge!
+    px(ctx, hx, hy - 1, '#ffe4cc', 1, 1);     // forehead sunlit catchlight
+    px(ctx, hx + 3, hy, '#e8a882', 1, 1);     // gentle 1px nose tip!
+    px(ctx, hx - 1, hy + 1, '#f2b88f', 3, 1); // lower cheek
+    px(ctx, hx, hy + 2, '#d4936a', 2, 1);     // tapered rounded chin
+    px(ctx, hx - 1, hy, '#e6a882', 1, 1);     // warm ear pixel
+
+    // Crisp always-visible eye on row hy-1
+    if (blinking) {
+      px(ctx, hx + 1, hy - 1, '#3b1e11', 2, 1);
+    } else if (shocked) {
+      // Wide shocked eye + open "O" gasp mouth!
+      px(ctx, hx + 1, hy - 1, '#ffffff', 2, 1);
+      px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
+      px(ctx, hx + 1, hy + 1, '#7a2520', 1, 1);
+    } else if (happy) {
+      px(ctx, hx + 1, hy - 1, '#ffffff', 1, 1);
+      px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
+      px(ctx, hx, hy, '#eb8a78', 1, 1);
+      px(ctx, hx + 1, hy + 1, '#b54d3e', 2, 1);
+    } else if (straining) {
+      px(ctx, hx + 1, hy - 1, '#fff5eb', 1, 1);
+      px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
+      px(ctx, hx + 1, hy + 1, '#a85745', 1, 1);
+    } else {
+      const lookDown = (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING');
+      px(ctx, hx + 1, hy - 1, '#ffffff', 1, 1);
+      px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
+      if (lookDown) px(ctx, hx + 1, hy, '#e89b84', 1, 1);
+    }
   } else {
-    // Crisp bright readable eye tracking toward the water/bobber
-    const lookDown = (g.state === 'WAITING' || g.state === 'BITE' || g.state === 'REELING');
-    px(ctx, hx + 1, hy - 1, '#ffffff', 1, 1);
-    px(ctx, hx + 2, hy - 1, '#111622', 1, 1);
-    if (lookDown) px(ctx, hx + 1, hy, '#e89b84', 1, 1);
+    // Chamfered organic LEFT-facing over-the-shoulder lookback watching the fish on the back of the dock!
+    px(ctx, hx + 3, hy - 1, '#5e3420', 1, 3); // back hair rim (right)
+    px(ctx, hx - 1, hy - 2, '#7d4628', 4, 1); // upper hair under hat
+    px(ctx, hx + 1, hy - 1, '#995732', 2, 2); // hair sideburn/lock
+    px(ctx, hx + 2, hy + 1, '#7d4628', 1, 1); // nape hair
+
+    // Warm sculpted face profile facing LEFT
+    px(ctx, hx - 2, hy - 1, '#f7c8a4', 3, 1); // brow
+    px(ctx, hx - 2, hy, '#f7c8a4', 4, 1);     // cheek + nose bridge
+    px(ctx, hx, hy - 1, '#ffe4cc', 1, 1);     // sunlit forehead catchlight
+    px(ctx, hx - 3, hy, '#e8a882', 1, 1);     // gentle 1px nose tip facing back of dock!
+    px(ctx, hx - 1, hy + 1, '#f2b88f', 3, 1); // lower cheek
+    px(ctx, hx - 1, hy + 2, '#d4936a', 2, 1); // tapered chin
+    px(ctx, hx + 1, hy, '#e6a882', 1, 1);     // warm ear pixel
+
+    if (shocked) {
+      // Wide stunned eye staring at the dock slam + gasp mouth + comic blue sweat drop!
+      px(ctx, hx - 1, hy - 1, '#ffffff', 1, 1);
+      px(ctx, hx - 2, hy - 1, '#111622', 1, 1);
+      px(ctx, hx - 1, hy + 1, '#7a2520', 1, 1);
+      px(ctx, hx + 2, hy - 1, '#38bdf8', 1, 2); // animated comic sweat drop!
+      px(ctx, hx + 2, hy - 1, '#e0f2fe', 1, 1);
+    } else {
+      // Proud & sheepish celebratory lookback grin at the fish flopping on the back of the dock!
+      px(ctx, hx - 1, hy - 1, '#ffffff', 1, 1);
+      px(ctx, hx - 2, hy - 1, '#111622', 1, 1);
+      px(ctx, hx, hy, '#eb8a78', 1, 1);         // rosy cheek
+      px(ctx, hx - 2, hy + 1, '#b54d3e', 2, 1); // big warm grin
+    }
   }
 
-  // Curved woven coastal straw sun-hat (stable, crisp, zero twitchy 1px bounce jitter!)
+  // Curved woven coastal straw sun-hat — pops up in mid-air when the supersonic fish zooms overhead!
   const hatTilt = Math.round(clamp((g.animLean || 0) * 0.22, -1, 1));
   const hatX = hx + hatTilt;
-  const hatY = hy - 3;
+  const hatY = hy - 3 - Math.round(rig.hatPopY || 0);
 
-  // Gently curved upturned straw brim (curved ends instead of flat brick!)
+  // Gently curved upturned straw brim
   px(ctx, hatX - 6, hatY, '#c98e30', 1, 1);      // upturned left brim tip
   px(ctx, hatX - 5, hatY + 1, '#784c18', 11, 1); // soft underside shadow of brim
   px(ctx, hatX - 5, hatY, '#f2c65e', 10, 1);     // main golden brim
@@ -540,7 +536,7 @@ function drawSculptedHeadAndHat(ctx, g, rig) {
   px(ctx, hatX - 3, hatY - 1, '#ff6b6b', 3, 1);
   px(ctx, hatX + 2, hatY - 1, '#991f2b', 2, 1);
 
-  // Rounded domed straw crown (tapered top row — zero sharp corners!)
+  // Rounded domed straw crown
   px(ctx, hatX - 3, hatY - 2, '#f2c65e', 7, 1);
   px(ctx, hatX - 3, hatY - 2, '#fff3b8', 3, 1);
   px(ctx, hatX + 2, hatY - 2, '#c98e30', 2, 1);
@@ -549,10 +545,20 @@ function drawSculptedHeadAndHat(ctx, g, rig) {
   px(ctx, hatX - 1, hatY - 4, '#c98e30', 3, 1); // soft woven crown top edge
 
   // Fluttering crimson hat-band tail streaming in the sea breeze!
-  const ribbonWave = Math.sin(g.time * 6.2 + 1.1) * 1.1;
+  const gustMult = (g.state === 'LANDING' && (g.landingT || 0) > 0.22 && (g.landingT || 0) < 0.56) ? 2.4 : 1.0;
+  const ribbonWave = Math.sin(g.time * 6.2 * gustMult + 1.1) * (1.1 * Math.min(1.6, gustMult));
   px(ctx, hatX - 4, hatY - 1, '#b82532', 1, 1);
   px(ctx, hatX - 5, hatY - 1 + Math.round(ribbonWave * 0.5), '#d93d46', 2, 1);
   px(ctx, hatX - 7, hatY + Math.round(ribbonWave), '#ff6b6b', 1, 1);
+
+  // Comic "!" shock mark popping beside the angler during the overhead flyby & dock slam!
+  if (g.state === 'LANDING' && (g.landingT || 0) >= 0.34 && (g.landingT || 0) <= 0.78) {
+    const pulse = Math.floor(g.time * 20) % 2 === 0;
+    const ex = hx + 7;
+    const ey = hy - 5;
+    px(ctx, ex, ey, pulse ? '#fef08a' : '#fb7185', 1, 3);
+    px(ctx, ex, ey + 4, '#fef08a', 1, 1);
+  }
 }
 
 export function renderArticulatedAngler(g, ctx) {
@@ -649,10 +655,10 @@ export function renderArticulatedAngler(g, ctx) {
   px(ctx, rig.gripX + 1, rig.gripY, '#f0b58b', 1, 1);
   px(ctx, rig.gripX, rig.gripY + 1, '#c2815d', 2, 1);
 
-  // 8. Front arm (right arm gripping rod butt when getting ready / cranking reel when fishing!)
+  // 8. Front arm (right arm gripping rod butt when getting ready / cranking reel / pointing back at dock!)
   const frontShoulderX = rig.shoulderX - 1.4;
   const frontShoulderY = rig.shoulderY + 0.8;
-  const frontArmBend = (g.state === 'CHARGING' && rig.reelX < frontShoulderX + 0.5) ? -1 : 1;
+  const frontArmBend = (rig.reelX < frontShoulderX + 0.5) ? -1 : 1;
   const frontElbow = solve2BoneIK(frontShoulderX, frontShoulderY, rig.reelX, rig.reelY, 4.9, 4.9, frontArmBend);
   // Rolled teal sleeve upper arm
   drawOrganicLimb(ctx, frontShoulderX, frontShoulderY, frontElbow.x, frontElbow.y, '#5bc9b4', '#2c8f83', '#133d3c', 2.0, 1.7);
@@ -667,41 +673,5 @@ export function renderArticulatedAngler(g, ctx) {
   if (onReel && !(g.state === 'REELING' && (g.fishThrashing || g.tension > 0.72))) {
     px(ctx, rig.reelX + 1, rig.reelY + 1, '#facc15', 1, 1);
   }
-
-  // 9. Zero-noclip realistic caught fish hold:
-  //    - 'hang'     (<=25px): Vertical MOUTH/LIP hold using lossless 90° CCW hang frames (short leader if wide/spiky!)
-  //    - 'gillHold' (> 25px): Left-facing HEAD/GILL-PLATE hold (mouth/gills on LEFT in outstretched hand, body out over water!)
-  if (g.state === 'CAUGHT' && g.lastCatchInfo) {
-    const spId = g.lastCatchInfo.species.id;
-    const sprSet = g.sprites.fish[spId];
-    const isHang = rig.holdMode === 'hang' && sprSet.hang && sprSet.hang.length > 0;
-    const frames = isHang ? sprSet.hang : (sprSet.left || sprSet.right);
-    const ct = g.catchTime || 0;
-    // Lively wet tail-twitch bursts right after catch + periodic natural wriggles!
-    const burstPhase = (ct + 0.6) % 2.3;
-    const inTailTwitch = ct < 0.68 || (ct > 0.7 && burstPhase < 0.32);
-    const flopSpeed = inTailTwitch ? 13.5 : 5.2;
-    const fSpr = frames[Math.floor(g.time * flopSpeed) % frames.length];
-    const fx = Math.round(rig.catchHoldX - fSpr.width / 2);
-    const fy = Math.round(rig.catchHoldY - fSpr.height / 2);
-
-    // If wide/spiky fish sits slightly forward of fingers for clean body clearance, draw taut short hook-leader to mouth!
-    if (isHang && rig.catchHoldX - rig.reelX > 2.4) {
-      drawPixelLineLocal(ctx, rig.reelX + 1, rig.reelY, rig.catchHoldX, fy + 1, '#e2e8f0');
-    }
-
-    ctx.drawImage(fSpr, fx, fy);
-
-    if (isHang) {
-      // Foreground thumb & forefinger gripping cleanly at the fish's MOUTH / short lip-leader!
-      px(ctx, rig.reelX, rig.reelY, '#ffe0c4', 2, 1);
-      px(ctx, rig.reelX + 1, rig.reelY + 1, '#f0b58b', 2, 1);
-      px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 1, 1);
-    } else {
-      // Foreground strong hand gripping cleanly underneath the giant fish's LOWER JAW / GILL-PLATE!
-      px(ctx, rig.reelX, rig.reelY - 1, '#ffe0c4', 2, 1);
-      px(ctx, rig.reelX, rig.reelY, '#f0b58b', 3, 1);
-      px(ctx, rig.reelX, rig.reelY + 1, '#c2815d', 2, 1);
-    }
-  }
+  // Caught & landing fish are now rendered on the back of the dock in js/renderer.js (renderLandingFishForeground)!
 }

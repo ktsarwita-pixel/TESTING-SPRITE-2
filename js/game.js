@@ -4,6 +4,7 @@ import { MAPS, getMapById } from './maps.js';
 import { buildSpriteCache, spriteToDataURL } from './sprites.js';
 import { renderGameWorld } from './renderer.js';
 import { computeAnglerRig } from './anglerRenderer.js';
+import { computeBackDockLanding } from './catchPhysics.js';
 import { sound } from './audio.js';
 
 const SAVE_KEY = 'pierline_pixel_fishing_v1';
@@ -377,7 +378,7 @@ class PierlineGame {
 
     this.waterY = Math.round(this.vh * (this.isPortrait ? 0.34 : 0.38));
     this.pierY = this.waterY - 14;
-    this.pierEndX = clamp(Math.round(this.vw * (this.isPortrait ? 0.33 : 0.24)), 54, 86);
+    this.pierEndX = clamp(Math.round(this.vw * (this.isPortrait ? 0.36 : 0.28)), 66, 96);
     this.anglerX = this.pierEndX - 24;
     this.anglerY = this.pierY - this.sprites.angler.idle0.h + 1;
 
@@ -1356,9 +1357,14 @@ class PierlineGame {
     this.landingStartY = this.activeFish.y;
     this.landingStartDir = this.activeFish.dir;
     this.landingBreachDone = false;
+    this.landingLaunchDone = false;
+    this.landingSlam1Done = false;
+    this.landingSlam2Done = false;
     this.landingGrabDone = false;
     this.landingFishAngle = -0.35;
-    // Physical weight factor (0.08 tiny minnow -> 1.0 colossal Leviathan/Kraken) drives body heave, knee dip & 2-hand hold!
+    this.dockBounceY = 0;
+    this.dockBounceVel = 0;
+    // Physical weight factor (0.08 tiny minnow -> 1.0 colossal Leviathan/Kraken) drives yank recoil, spin speed & dock slam shockwave!
     const sp = this.activeFish.species;
     const avgW = ((sp.minWeight || 0.2) + (sp.maxWeight || 1.0)) * 0.5;
     this.landingWeightFactor = clamp(Math.log10(1 + avgW) / 2.15, 0.08, 1.0);
@@ -1368,8 +1374,9 @@ class PierlineGame {
         f.homeY = clamp(f.y, this.waterY + 8, this.getSeabedY(f.x) - 8);
       }
     }
-    this.spawnSplash(this.activeFish.x, this.waterY, Math.round(10 + this.landingWeightFactor * 10));
+    this.spawnSplash(this.activeFish.x, this.waterY, Math.round(14 + this.landingWeightFactor * 12));
     this.spawnRipple(this.activeFish.x, this.waterY);
+    this.spawnFloat(this.anglerX + 11, this.pierY - 34, this.landingWeightFactor > 0.6 ? 'MAX PULL!!' : 'YOINK!!', '#fef08a');
     sound.playLandingLift();
     this.updateControlsUI();
   }
@@ -1879,11 +1886,12 @@ class PierlineGame {
     if (this.state === 'LANDING') {
       const t = clamp(this.landingT || 0, 0, 1);
       const wf = this.landingWeightFactor ?? 0.35;
-      // Beat 1: power rod heave (-1.04 -> -1.52); Beat 2+: smooth rest behind rear shoulder (-2.28)
-      if (t < 0.38) return lerp(-1.04, -1.52 - wf * 0.08, smoothstep(t / 0.38));
-      return lerp(-1.52 - wf * 0.08, -2.28, smoothstep((t - 0.38) / 0.62));
+      // Beat 1: VIOLENT over-reel rod whip back past vertical (-1.04 -> -2.42); Beat 2+: recoil rest behind shoulder (-2.34)
+      if (t < 0.22) return lerp(-1.04, -2.42 - wf * 0.08, smoothstep(t / 0.22));
+      if (t < 0.56) return lerp(-2.42 - wf * 0.08, -2.26, smoothstep((t - 0.22) / 0.34));
+      return -2.26;
     }
-    if (this.state === 'CAUGHT') return -2.28;
+    if (this.state === 'CAUGHT') return -2.26;
     return -0.62;
   }
 
@@ -1932,6 +1940,20 @@ class PierlineGame {
     if (this.castFollowThrough > 0) this.castFollowThrough = Math.max(0, this.castFollowThrough - dt);
     if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - dt);
 
+    // Damped bounce physics for jumping dock props (bucket, tacklebox, bollard gull) on heavy fish slams!
+    if (this.dockBounceY < 0 || Math.abs(this.dockBounceVel || 0) > 0.1) {
+      this.dockBounceVel = (this.dockBounceVel || 0) + 210 * dt;
+      this.dockBounceY = (this.dockBounceY || 0) + this.dockBounceVel * dt;
+      if (this.dockBounceY >= 0) {
+        this.dockBounceY = 0;
+        if (Math.abs(this.dockBounceVel) > 14) {
+          this.dockBounceVel = -this.dockBounceVel * 0.36;
+        } else {
+          this.dockBounceVel = 0;
+        }
+      }
+    }
+
     // Smooth rod angle interpolation (no abrupt snaps across states!)
     this.rodAngle = lerp(this.rodAngle, this.getTargetRodAngle(), 1 - Math.exp(-11 * dt));
 
@@ -1969,34 +1991,43 @@ class PierlineGame {
         }
       }
     } else if (this.state === 'LANDING') {
-      // Realistic 4-beat human catch biomechanics scaled dramatically by fish weight (Minnow vs. Leviathan!)
+      // Insane 5-beat Over-Reel Back-of-Dock Launch biomechanics:
+      //   Beat 1 (0..0.22): TURBO OVER-REEL YANK — deep brace & huge lean-back ripping fish out of sea!
+      //   Beat 2 (0.22..0.56): PANIC DUCK — angler ducks low as spinning fish rockets over their hat!
+      //   Beat 3 (0.56..0.75): DOCK SLAM SHOCK — flinch jolt + lean forward turning head back!
+      //   Beat 4-5 (0.75..1.00): PROUD / SHEEPISH RECOVERY looking back at flopping fish on back of dock!
       const t = clamp(this.landingT || 0, 0, 1);
       const wf = this.landingWeightFactor ?? 0.35;
-      if (t < 0.38) {
-        // Beat 1 — Power Breakout Heave: brace boots wide, drop hips, haul back against water drag
-        const p = smoothstep(t / 0.38);
-        targetLean = lerp(-1.4, -2.1 - wf * 1.7, p);
-        targetSquat = lerp(1.0, 1.3 + wf * 1.5, p);
-        targetStance = lerp(0.9, 0.95 + wf * 0.05, p);
-      } else if (t < 0.66) {
-        // Beat 2 & 3 — Forward Weight Shift + Tactile Catch Impact Cushion at t = 0.62!
-        const p = smoothstep((t - 0.38) / 0.28);
-        const cushion = Math.exp(-Math.pow((t - 0.62) / 0.07, 2)) * (0.65 + wf * 1.35);
-        targetLean = lerp(-2.1 - wf * 1.5, 1.35 - wf * 0.4, p);
-        targetSquat = lerp(1.3 + wf * 1.2, 0.35 + wf * 0.25, p) + cushion;
-        targetStance = lerp(0.95, 0.55 + wf * 0.22, p);
+      if (t < 0.22) {
+        const p = smoothstep(t / 0.22);
+        targetLean = lerp(-1.4, -3.6 - wf * 1.4, p);
+        targetSquat = lerp(1.0, 2.0 + wf * 1.2, p);
+        targetStance = lerp(0.9, 1.0, p);
+      } else if (t < 0.56) {
+        // Duck down low as fish whizzes right overhead!
+        const p = smoothstep((t - 0.22) / 0.34);
+        const duckBell = Math.sin(p * Math.PI);
+        targetLean = lerp(-3.6 - wf * 1.4, 1.1, p);
+        targetSquat = lerp(2.0 + wf * 1.2, 1.4, p) + duckBell * (2.2 + wf * 1.1);
+        targetStance = lerp(1.0, 0.85, p);
+      } else if (t < 0.78) {
+        // Impact shock flinch at t=0.56, then recover upright looking back at dock!
+        const p = smoothstep((t - 0.56) / 0.22);
+        const flinch = Math.exp(-Math.pow((t - 0.57) / 0.05, 2)) * (1.2 + wf * 0.9);
+        targetLean = lerp(1.1, 0.85, p);
+        targetSquat = lerp(1.4, 0.45, p) + flinch;
+        targetStance = lerp(0.85, 0.55, p);
       } else {
-        // Beat 4 — Proud Trophy Presentation: upright for light fish, counterbalanced lean-back for massive beasts!
-        const p = smoothstep((t - 0.66) / 0.34);
-        targetLean = lerp(1.2 - wf * 0.35, 0.25 - wf * 0.95, p);
-        targetSquat = lerp(0.45 + wf * 0.35, wf * 0.32, p);
-        targetStance = lerp(0.58 + wf * 0.2, 0.40 + wf * 0.35, p);
+        const p = smoothstep((t - 0.78) / 0.22);
+        targetLean = lerp(0.85, 0.65, p);
+        targetSquat = lerp(0.45, 0.22 + wf * 0.18, p);
+        targetStance = lerp(0.55, 0.42, p);
       }
     } else if (this.state === 'CAUGHT') {
       const wf = this.landingWeightFactor ?? 0.35;
-      targetLean = 0.25 - wf * 0.95;
-      targetSquat = wf * 0.32;
-      targetStance = 0.40 + wf * 0.35;
+      targetLean = 0.65;
+      targetSquat = 0.22 + wf * 0.18;
+      targetStance = 0.42;
     }
     const kinEase = 1 - Math.exp(-10 * dt);
     this.animLean = lerp(this.animLean, targetLean, kinEase);
@@ -2220,114 +2251,155 @@ class PierlineGame {
       this.updateReeling(dt);
     } else if (this.state === 'LANDING') {
       const wf = this.landingWeightFactor ?? 0.35;
-      // Realistic weight-driven tempo: snappy 0.88s for light minnows -> dramatic 1.28s haul for Leviathan/Kraken!
-      this.landingT += dt * lerp(1.14, 0.78, wf);
+      // Snappy comedic tempo: ~1.55s for light minnows -> ~1.88s blockbuster slam for Leviathan/Kraken!
+      this.landingT += dt * lerp(0.65, 0.53, wf);
       const t = clamp(this.landingT, 0, 1);
       const rig = computeAnglerRig(this);
-      const sprSet = this.activeFish && this.sprites.fish[this.activeFish.species.id];
-      const sprW = sprSet ? sprSet.w : 18;
-      const sprH = sprSet ? sprSet.h : 12;
+      const land = computeBackDockLanding(this, rig);
+      const fx = land.x;
+      const fy = land.y;
 
-      let fx, fy;
-      if (t < 0.62) {
-        // Real gravity physics: light fish whips higher & faster; heavy giants haul smoothly clear of the pier lip!
-        const p = smoothstep(t / 0.62);
-        const arcPeak = lerp(22, 16, wf);
-        const liftArc = Math.sin(p * Math.PI) * arcPeak;
-        const safeStartX = Math.max(this.landingStartX, this.pierEndX + sprW * 0.5 + 3);
-        fx = lerp(safeStartX, rig.catchHoldX, p);
-        fy = lerp(this.landingStartY, rig.catchHoldY, p) - liftArc;
-
-        // Strict pier-edge vertical clearance guard: ZERO fish pixels EVER clip through wooden dock planks!
-        if (fx - sprW * 0.5 <= this.pierEndX + 1) {
-          fy = Math.min(fy, this.pierY - sprH * 0.5 - 2);
-        }
-        // Strict body clearance guard: ZERO fish pixels EVER fly through the angler's chest, head, or legs!
-        const minSafeX = Math.max(rig.shoulderX + 4.4, rig.headX + 3.6) + sprW * 0.5 + 0.6;
-        if (fx < minSafeX) fx = minSafeX;
-
-        // Dramatic foaming water-breach burst + ripple + heavy-fish micro-shake as fish clears the waves!
-        if (!this.landingBreachDone && fy < this.waterY - 2) {
-          this.landingBreachDone = true;
-          this.spawnSplash(fx, this.waterY, Math.round(9 + wf * 11));
-          this.spawnRipple(fx, this.waterY);
-          if (wf > 0.55) {
-            this.shakeTime = Math.max(this.shakeTime, 0.14);
-            this.shakeMag = Math.max(this.shakeMag, 0.8 + wf * 0.7);
-          }
-        }
-      } else {
-        // Tactile catch handoff: wet shake-off spray + subtle weight-impact thump + 0.00px continuity into CAUGHT!
-        if (!this.landingGrabDone) {
-          this.landingGrabDone = true;
-          if (wf > 0.45) {
-            this.shakeTime = Math.max(this.shakeTime, 0.12);
-            this.shakeMag = Math.max(this.shakeMag, 0.6 + wf * 0.9);
-          }
-          for (let i = 0; i < Math.round(7 + wf * 8); i++) {
-            this.particles.push({
-              x: rig.catchHoldX + rand(-4, 4),
-              y: rig.catchHoldY + rand(-2, 3),
-              vx: rand(-26, 26),
-              vy: rand(-26, -4),
-              g: 122,
-              life: rand(0.22, 0.46),
-              size: 1,
-              color: i % 2 === 0 ? '#e0f2fe' : '#7dd3fc',
-            });
-          }
-        }
-        fx = rig.catchHoldX;
-        fy = rig.catchHoldY;
+      // 1. Water breach geyser as the over-reeled fish explodes out of the waves!
+      if (!this.landingBreachDone && fy < this.waterY - 2) {
+        this.landingBreachDone = true;
+        this.spawnSplash(fx, this.waterY, Math.round(14 + wf * 14));
+        this.spawnRipple(fx, this.waterY);
+        this.shakeTime = Math.max(this.shakeTime, 0.14);
+        this.shakeMag = Math.max(this.shakeMag, 1.0 + wf * 1.0);
       }
 
-      // Continuous head-first physics (dir=-1, mouth toward angler!):
-      //   'hang'     (<=25px): mouth arrives directly into hand and swings into lossless 90° vertical hang at t>=0.62!
-      //   'gillHold' (> 25px): head/gill-plate arrives directly into outstretched hand — ZERO weird 180° flip, ZERO noclip!
-      const isHang = rig.holdMode === 'hang';
+      // 2. Beat 2 launch trigger: supersonic WHOOSH + golden line-ping spark burst as fish rockets over hat!
+      if (!this.landingLaunchDone && t >= 0.22) {
+        this.landingLaunchDone = true;
+        sound.playOverReelLaunch(wf, this.panAtX(fx));
+        for (let i = 0; i < 10; i++) {
+          this.particles.push({
+            x: fx + rand(-4, 4),
+            y: fy + rand(-3, 3),
+            vx: rand(-35, 25),
+            vy: rand(-36, 12),
+            g: 95,
+            life: rand(0.20, 0.42),
+            size: i % 3 === 0 ? 2 : 1,
+            color: i % 2 === 0 ? '#fef08a' : '#e0f2fe',
+          });
+        }
+      }
+
+      // 3. Beat 3 MEGA DOCK SLAM #1 at t = 0.56: screen shake + jumping dock props + wood splinters + water burst + shout!
+      if (!this.landingSlam1Done && t >= 0.56) {
+        this.landingSlam1Done = true;
+        this.landingGrabDone = true;
+        sound.playDockSlam(wf, 0, this.panAtX(land.slamX));
+        this.shakeTime = Math.max(this.shakeTime, 0.24 + wf * 0.20);
+        this.shakeMag = Math.max(this.shakeMag, 1.9 + wf * 2.6);
+        // Launch bait bucket, tacklebox & dock props upward from the shockwave!
+        this.dockBounceVel = -(44 + wf * 34);
+        const shout = wf > 0.72 ? 'KABOOM!!' : wf > 0.35 ? 'WHAM!!' : 'SMACK!!';
+        this.spawnFloat(Math.max(24, land.slamX), Math.max(12, this.pierY - land.h - 10), shout, wf > 0.65 ? '#fb7185' : '#fef08a');
+        // Huge radial spray of water droplets + wooden dock splinters + white dust clouds!
+        const map = this.getCurrentMap();
+        const splinterCol = map.dockStyle === 'marble' ? '#e2e8f0' : map.dockStyle === 'basalt' ? '#fb923c' : map.dockStyle === 'frost' ? '#bae6fd' : '#c98c50';
+        const burstN = Math.round(18 + wf * 18);
+        for (let i = 0; i < burstN; i++) {
+          const ang = -Math.PI * rand(0.08, 0.92);
+          const spd = rand(18, 56 + wf * 28);
+          this.particles.push({
+            x: land.slamX + rand(-land.w * 0.32, land.w * 0.32),
+            y: this.pierY - 1,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd - rand(4, 16),
+            g: 138,
+            life: rand(0.26, 0.58),
+            size: i % 4 === 0 ? 2 : 1,
+            color: i % 3 === 0 ? splinterCol : i % 3 === 1 ? '#e0f2fe' : '#fde047',
+          });
+        }
+      }
+
+      // 4. Beat 4 secondary bounce SLAM #2 at t = 0.75: mini shake + splatter + soft thump!
+      if (!this.landingSlam2Done && t >= 0.75) {
+        this.landingSlam2Done = true;
+        sound.playDockSlam(wf, 1, this.panAtX(fx));
+        this.shakeTime = Math.max(this.shakeTime, 0.10 + wf * 0.08);
+        this.shakeMag = Math.max(this.shakeMag, 0.9 + wf * 1.1);
+        this.dockBounceVel = Math.min(this.dockBounceVel || 0, -(20 + wf * 16));
+        for (let i = 0; i < Math.round(8 + wf * 8); i++) {
+          this.particles.push({
+            x: fx + rand(-land.w * 0.28, land.w * 0.28),
+            y: this.pierY - 1,
+            vx: rand(-28, 28),
+            vy: rand(-34, -8),
+            g: 128,
+            life: rand(0.20, 0.42),
+            size: 1,
+            color: i % 2 === 0 ? '#bae6fd' : '#f8fafc',
+          });
+        }
+      }
+
       this.landingTurnScaleX = 1;
       if (this.activeFish) {
         this.activeFish.x = fx;
         this.activeFish.y = fy;
-        this.activeFish.dir = -1;
+        this.activeFish.dir = land.mode === 'right' ? 1 : -1;
       }
-      // Fishing line stays hooked to the fish's actual MOUTH (left snout while flying/gill-held, top mouth once hanging!)
-      this.hookX = (isHang && t >= 0.62) ? fx : fx - (sprW * 0.42);
-      this.hookY = (isHang && t >= 0.62) ? (fy - sprW * 0.42) : (fy + 0.8);
+      this.hookX = land.hookX;
+      this.hookY = land.hookY;
 
-      // Realistic elastic rod-tip bend under heave (0..0.36) -> damped elastic whip rebound upon water breakout!
-      const targetFlex = t < 0.36
-        ? (0.42 + wf * 0.42) * Math.sin((t / 0.36) * Math.PI * 0.78)
-        : Math.exp(-(t - 0.36) * 7.5) * Math.cos((t - 0.36) * 18) * (0.20 + wf * 0.14);
-      this.rodFlex = lerp(this.rodFlex, targetFlex, 1 - Math.exp(-13 * dt));
+      // Violent elastic rod bend under turbo yank (0..0.22) -> wild whipping rebound oscillation!
+      const targetFlex = t < 0.22
+        ? (0.65 + wf * 0.35) * Math.sin((t / 0.22) * Math.PI * 0.82)
+        : Math.exp(-(t - 0.22) * 6.5) * Math.cos((t - 0.22) * 24) * (0.34 + wf * 0.16);
+      this.rodFlex = lerp(this.rodFlex, targetFlex, 1 - Math.exp(-15 * dt));
 
-      // Trailing glistening water droplets streaming off the airborne fish
-      if (t < 0.78 && Math.random() < dt * (22 + wf * 16)) {
+      // Streaming glistening water droplets & starlight sparks trailing off the flying spinning fish!
+      if (t < 0.72 && Math.random() < dt * (34 + wf * 18)) {
         this.particles.push({
-          x: fx + rand(-sprW * 0.3, sprW * 0.3),
-          y: fy + rand(0, Math.max(3, sprH * 0.35)),
-          vx: rand(-14, 14),
-          vy: rand(4, 22),
-          g: 118,
-          life: rand(0.22, 0.44),
+          x: fx + rand(-land.w * 0.3, land.w * 0.3),
+          y: fy + rand(-land.h * 0.25, land.h * 0.35),
+          vx: rand(-12, 18),
+          vy: rand(-6, 18),
+          g: 112,
+          life: rand(0.20, 0.46),
           size: 1,
-          color: Math.random() < 0.5 ? '#e0f2fe' : '#bae6fd',
+          color: Math.random() < 0.65 ? '#e0f2fe' : '#7dd3fc',
         });
       }
       if (t >= 1) this.completeCatch();
     } else if (this.state === 'CAUGHT') {
+      const prevCt = this.catchTime;
       this.catchTime += dt;
       this.rodFlex = lerp(this.rodFlex, 0, 1 - Math.exp(-6 * dt));
-      // Occasional wet water droplets dripping off the freshly caught fish!
-      if (this.catchTime < 3.5 && Math.random() < dt * 7) {
+      // Spray tiny wet droplets off the back of the dock whenever the flopping fish slaps down!
+      const cycle = 1.28;
+      const prevLocal = prevCt % cycle;
+      const curLocal = this.catchTime % cycle;
+      if (this.catchTime > 0.2 && ((prevLocal < 0.54 && curLocal >= 0.54) || (prevLocal < 0.84 && curLocal >= 0.84))) {
         const rig = computeAnglerRig(this);
+        const land = computeBackDockLanding(this, rig);
+        for (let i = 0; i < 6; i++) {
+          this.particles.push({
+            x: land.restX + rand(-land.w * 0.35, land.w * 0.35),
+            y: this.pierY - 1,
+            vx: rand(-20, 20),
+            vy: rand(-24, -6),
+            g: 120,
+            life: rand(0.18, 0.36),
+            size: 1,
+            color: i % 2 === 0 ? '#e0f2fe' : '#7dd3fc',
+          });
+        }
+      } else if (Math.random() < dt * 5) {
+        const rig = computeAnglerRig(this);
+        const land = computeBackDockLanding(this, rig);
         this.particles.push({
-          x: rig.catchHoldX + rand(-5, 5),
-          y: rig.catchHoldY + rand(2, 5),
-          vx: rand(-4, 4),
-          vy: rand(2, 8),
+          x: land.x + rand(-land.w * 0.3, land.w * 0.3),
+          y: land.y + rand(0, Math.max(2, land.h * 0.3)),
+          vx: rand(-6, 6),
+          vy: rand(-10, 4),
           g: 110,
-          life: rand(0.28, 0.52),
+          life: rand(0.22, 0.42),
           size: 1,
           color: '#bae6fd',
         });

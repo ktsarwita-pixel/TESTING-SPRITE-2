@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, '../..');
 
 import { computeAnglerRig, renderArticulatedAngler } from '../../js/anglerRenderer.js';
+import { computeBackDockLanding } from '../../js/catchPhysics.js';
 import { FISH_SPRITES } from '../../js/fishSprites.js';
 import { FISH_SPECIES } from '../../js/fishData.js';
 import { PALETTE } from '../../js/palette.js';
@@ -17,24 +17,36 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const smoothstep = (t) => t * t * (3 - 2 * t);
 
-export function rotateHangGrid(grid) {
+export function rotateGrid(grid, mode = 'right') {
   const h = grid.length;
   const w = grid[0].length;
-  const out = Array.from({ length: w }, () => Array(h).fill('.'));
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      // Exact lossless 90° CCW transpose: MOUTH (x=w-1) at TOP (dy=0), slim dorsal LEFT (dx=y), round belly RIGHT!
-      out[w - 1 - x][y] = grid[y][x];
-    }
+  if (mode === 'left') return grid.map((r) => r.split('').reverse().join(''));
+  if (mode === '180' || mode === 'flip') {
+    const out = Array.from({ length: h }, () => Array(w).fill('.'));
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++)
+        out[h - 1 - y][w - 1 - x] = grid[y][x];
+    return out.map((r) => r.join(''));
   }
-  return out.map((r) => r.join(''));
+  if (mode === 'hang') {
+    const out = Array.from({ length: w }, () => Array(h).fill('.'));
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++)
+        out[w - 1 - x][y] = grid[y][x];
+    return out.map((r) => r.join(''));
+  }
+  if (mode === 'hangCW') {
+    const out = Array.from({ length: w }, () => Array(h).fill('.'));
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++)
+        out[x][h - 1 - y] = grid[y][x];
+    return out.map((r) => r.join(''));
+  }
+  return grid;
 }
 
 export function getFishGrid(id, mode = 'right') {
-  const base = FISH_SPRITES[id][0];
-  if (mode === 'left') return base.map((r) => r.split('').reverse().join(''));
-  if (mode === 'hang') return rotateHangGrid(base);
-  return base;
+  return rotateGrid(FISH_SPRITES[id][0], mode);
 }
 
 // Build exact real-game frame state at normalized landing progress `st` (0..1, >=1 = CAUGHT)
@@ -47,37 +59,45 @@ export function buildGameFrameState(fishId, st) {
   const isCaught = st >= 1.0;
   const t = clamp(st, 0, 1);
 
-  // Exact live-game pier/water proportions from js/game.js resize():
-  // pierY = waterY - 14; anglerX = pierEndX - 24
-  const pierEndX = 76;
-  const anglerX = pierEndX - 24; // 52
+  // Exact live-game desktop pier/water proportions from js/game.js resize() (vw=320):
+  // pierEndX = round(320 * 0.28) = 90; anglerX = pierEndX - 24 = 66; pierY = 62; waterY = 76
+  const pierEndX = 90;
+  const anglerX = pierEndX - 24; // 66
   const pierY = 62;
   const waterY = pierY + 14; // 76
 
   let lean, squat, stance;
-  if (t < 0.38) {
-    const p = smoothstep(t / 0.38);
-    lean = lerp(-1.4, -2.1 - wf * 1.7, p);
-    squat = lerp(1.0, 1.3 + wf * 1.5, p);
-    stance = lerp(0.9, 0.95 + wf * 0.05, p);
-  } else if (t < 0.66) {
-    const p = smoothstep((t - 0.38) / 0.28);
-    const cushion = Math.exp(-Math.pow((t - 0.62) / 0.07, 2)) * (0.65 + wf * 1.35);
-    lean = lerp(-2.1 - wf * 1.5, 1.35 - wf * 0.4, p);
-    squat = lerp(1.3 + wf * 1.2, 0.35 + wf * 0.25, p) + cushion;
-    stance = lerp(0.95, 0.55 + wf * 0.22, p);
+  if (t < 0.22) {
+    const p = smoothstep(t / 0.22);
+    lean = lerp(-1.4, -3.6 - wf * 1.4, p);
+    squat = lerp(1.0, 2.0 + wf * 1.2, p);
+    stance = lerp(0.9, 1.0, p);
+  } else if (t < 0.56) {
+    const p = smoothstep((t - 0.22) / 0.34);
+    const duckBell = Math.sin(p * Math.PI);
+    lean = lerp(-3.6 - wf * 1.4, 1.1, p);
+    squat = lerp(2.0 + wf * 1.2, 1.4, p) + duckBell * (2.2 + wf * 1.1);
+    stance = lerp(1.0, 0.85, p);
+  } else if (t < 0.78) {
+    const p = smoothstep((t - 0.56) / 0.22);
+    const flinch = Math.exp(-Math.pow((t - 0.57) / 0.05, 2)) * (1.2 + wf * 0.9);
+    lean = lerp(1.1, 0.85, p);
+    squat = lerp(1.4, 0.45, p) + flinch;
+    stance = lerp(0.85, 0.55, p);
   } else {
-    const p = smoothstep((t - 0.66) / 0.34);
-    lean = lerp(1.2 - wf * 0.35, 0.25 - wf * 0.95, p);
-    squat = lerp(0.45 + wf * 0.35, wf * 0.32, p);
-    stance = lerp(0.58 + wf * 0.2, 0.40 + wf * 0.35, p);
+    const p = smoothstep((t - 0.78) / 0.22);
+    lean = lerp(0.85, 0.65, p);
+    squat = lerp(0.45, 0.22 + wf * 0.18, p);
+    stance = lerp(0.55, 0.42, p);
   }
-  const rodAngle = t < 0.38
-    ? lerp(-1.04, -1.52 - wf * 0.08, smoothstep(t / 0.38))
-    : lerp(-1.52 - wf * 0.08, -2.28, smoothstep((t - 0.38) / 0.62));
-  const rodFlex = t < 0.36
-    ? (0.42 + wf * 0.42) * Math.sin((t / 0.36) * Math.PI * 0.78)
-    : Math.exp(-(t - 0.36) * 7.5) * Math.cos((t - 0.36) * 18) * (0.20 + wf * 0.14);
+  const rodAngle = t < 0.22
+    ? lerp(-1.04, -2.42 - wf * 0.08, smoothstep(t / 0.22))
+    : t < 0.56
+      ? lerp(-2.42 - wf * 0.08, -2.26, smoothstep((t - 0.22) / 0.34))
+      : -2.26;
+  const rodFlex = t < 0.22
+    ? (0.65 + wf * 0.35) * Math.sin((t / 0.22) * Math.PI * 0.82)
+    : Math.exp(-(t - 0.22) * 6.5) * Math.cos((t - 0.22) * 24) * (0.34 + wf * 0.16);
 
   const g = {
     anglerX, pierY, pierEndX, waterY,
@@ -85,9 +105,11 @@ export function buildGameFrameState(fishId, st) {
     state: isCaught ? 'CAUGHT' : 'LANDING',
     animLean: lean, animSquat: squat, animStance: stance,
     rodAngle, rodFlex, landingT: t, landingWeightFactor: wf,
-    catchTime: isCaught ? 0.22 : 0,
+    catchTime: isCaught ? 0.32 : 0,
     landingInitGripDX: 5.2, landingInitGripDY: 1.2,
     landingInitReelDX: 3.1, landingInitReelDY: 2.3,
+    landingStartX: pierEndX + Math.max(12, sprW * 0.5 + 4),
+    landingStartY: waterY + 4,
     save: { upgrades: { rod: 3 } },
     activeFish: isCaught ? null : { species: { id: fishId }, x: 0, y: 0, dir: -1 },
     lastCatchInfo: isCaught ? { species: { id: fishId } } : null,
@@ -98,6 +120,8 @@ export function buildGameFrameState(fishId, st) {
           right: Array(4).fill({ id: fishId, mode: 'right', width: sprW, height: sprH }),
           left: Array(4).fill({ id: fishId, mode: 'left', width: sprW, height: sprH }),
           hang: Array(4).fill({ id: fishId, mode: 'hang', width: sprH, height: sprW }),
+          hangCW: Array(4).fill({ id: fishId, mode: 'hangCW', width: sprH, height: sprW }),
+          flip: Array(4).fill({ id: fishId, mode: 'flip', width: sprW, height: sprH }),
         },
       },
     },
@@ -107,16 +131,14 @@ export function buildGameFrameState(fishId, st) {
 
 // Rasterize one frame into layered occupancy maps + final RGB pixels for noclip analysis AND PNG screenshots!
 export function rasterizeFrame(fishId, st) {
-  const { g, wf, sprW, sprH, isCaught, t } = buildGameFrameState(fishId, st);
+  const { g, isCaught, t } = buildGameFrameState(fishId, st);
   const rig = computeAnglerRig(g);
+  const land = computeBackDockLanding(g, rig);
 
-  // Layer sets: "x,y"
   const pierPx = new Set();
-  const anglerBodyPx = new Set(); // head + hat + torso + legs (NOT outstretched forearm/hand holding fish)
+  const anglerBodyPx = new Set();
   const anglerHeadPx = new Set();
-  const handPx = new Set();
   const fishPx = new Set();
-  const rgbMap = new Map();
 
   // Fill wooden pier planks (x: 0..pierEndX, y: pierY..pierY+4)
   for (let py = g.pierY; py <= g.pierY + 4; py++) {
@@ -125,15 +147,14 @@ export function rasterizeFrame(fishId, st) {
     }
   }
 
-  // Capture angler draw calls (separating angler body vs CAUGHT fish)
-  let inCaughtFish = false;
+  // Capture angler draw calls
   const angOps = [];
   const ctx = {
     fillStyle: '#fff', globalAlpha: 1, stack: [],
     save() { this.stack.push([this.fillStyle, this.globalAlpha]); },
     restore() { [this.fillStyle, this.globalAlpha] = this.stack.pop(); },
     fillRect(x, y, w, h) {
-      angOps.push({ op: 'rect', x, y, w, h, c: this.fillStyle, a: this.globalAlpha, isFish: inCaughtFish });
+      angOps.push({ op: 'rect', x, y, w, h, c: this.fillStyle, a: this.globalAlpha });
     },
     drawImage(img, x, y, dw, dh) {
       angOps.push({ op: 'img', id: img.id, mode: img.mode || 'right', x, y, dw: dw || img.width, dh: dh || img.height });
@@ -142,13 +163,12 @@ export function rasterizeFrame(fishId, st) {
 
   renderArticulatedAngler(g, ctx);
 
-  // Record angler body silhouette pixels BEFORE fish is drawn!
+  // Record full angler silhouette (head + hat + torso + legs)
   const hx = Math.round(rig.headX);
   const hy = Math.round(rig.headY);
-  const bodyMinX = Math.round(rig.shoulderX - 5);
-  const bodyMaxX = Math.round(rig.shoulderX + 3.2);
-  const handRx = Math.round(rig.reelX);
-  const handRy = Math.round(rig.reelY);
+  const hatTop = hy - 7 - Math.ceil(rig.hatPopY || 0);
+  const bodyMinX = Math.round(Math.min(rig.backFootX - 2, rig.shoulderX - 6, hx - 6));
+  const bodyMaxX = Math.round(Math.max(rig.frontFootX + 3, rig.shoulderX + 6, hx + 6));
 
   for (const op of angOps) {
     if (op.op === 'rect') {
@@ -158,99 +178,101 @@ export function rasterizeFrame(fishId, st) {
         for (let dx = 0; dx < iw; dx++) {
           const px = ix + dx, py = iy + dy;
           const k = `${px},${py}`;
-          rgbMap.set(k, op.c);
-          // Classify body vs front hand
-          const nearHand = Math.abs(px - handRx) <= 2 && Math.abs(py - handRy) <= 2;
-          if (nearHand) {
-            handPx.add(k);
-          } else if (px >= hx - 3 && px <= hx + 3 && py >= hy - 4 && py <= hy + 2) {
+          if (px >= hx - 6 && px <= hx + 6 && py >= hatTop && py <= hy + 2) {
             anglerHeadPx.add(k);
             anglerBodyPx.add(k);
-          } else if (px >= bodyMinX && px <= bodyMaxX && py >= hy - 4 && py <= g.pierY) {
+          } else if (px >= bodyMinX && px <= bodyMaxX && py >= hatTop && py <= g.pierY) {
             anglerBodyPx.add(k);
           }
-        }
-      }
-    } else if (op.op === 'img') {
-      const grid = getFishGrid(op.id, op.mode);
-      const ix = Math.round(op.x), iy = Math.round(op.y);
-      for (let ry = 0; ry < grid.length; ry++) {
-        for (let rx = 0; rx < grid[ry].length; rx++) {
-          const ch = grid[ry][rx];
-          if (ch === '.') continue;
-          const k = `${ix + rx},${iy + ry}`;
-          fishPx.add(k);
-          rgbMap.set(k, PALETTE[ch]);
         }
       }
     }
   }
 
-  // If LANDING, simulate exact live js/game.js LANDING trajectory + js/renderer.js renderLandingFishForeground!
+  // Simulate exact live js/renderer.js renderLineAndHook + renderLandingFishForeground!
   const extraOps = [];
   if (!isCaught) {
-    const isHang = rig.holdMode === 'hang';
-    const startX = g.pierEndX + Math.max(10, sprW * 0.5 + 3);
-    const startY = g.waterY + 4;
-    let fx, fy;
-    if (t < 0.62) {
-      const p = smoothstep(t / 0.62);
-      const arcPeak = lerp(22, 16, wf);
-      fx = lerp(startX, rig.catchHoldX, p);
-      fy = lerp(startY, rig.catchHoldY, p) - Math.sin(p * Math.PI) * arcPeak;
-      // Exact pier-edge vertical clearance guard!
-      const curHalfW = sprW * 0.5;
-      const curHalfH = sprH * 0.5;
-      if (fx - curHalfW <= g.pierEndX + 1) {
-        fy = Math.min(fy, g.pierY - curHalfH - 2);
-      }
-      // Body clearance guard during flight: never cross into angler torso!
-      const minSafeX = Math.max(rig.shoulderX + 4.4, rig.headX + 3.6) + curHalfW + 0.6;
-      if (fx < minSafeX) fx = minSafeX;
-    } else {
-      fx = rig.catchHoldX;
-      fy = rig.catchHoldY;
-    }
-
-    const isHangCaught = t >= 0.62 && isHang;
-    const mode = isHangCaught ? 'hang' : 'left';
-    const grid = getFishGrid(fishId, mode);
-    const imgW = grid[0].length;
-    const imgH = grid.length;
-    const hookX = isHangCaught ? fx : fx - (sprW * 0.42);
-    const hookY = isHangCaught ? (fy - sprW * 0.42) : (fy + 0.8);
-
-    if (t < 0.40) {
-      extraOps.push({ op: 'line', x0: rig.tipX, y0: rig.tipY, x1: hookX, y1: hookY, c: '#f1f5f9', a: 1 });
-    } else if (t < 0.58) {
-      const lp = (t - 0.40) / 0.18;
+    if (t < 0.24) {
+      extraOps.push({ op: 'line', x0: rig.tipX, y0: rig.tipY, x1: land.hookX, y1: land.hookY, c: '#fef08a', a: 1 });
+    } else if (t < 0.46) {
+      const lp = (t - 0.24) / 0.22;
+      const tailX = rig.tipX + lerp(16, 4, lp);
+      const tailY = rig.tipY + lerp(6, 18, lp);
       extraOps.push({
         op: 'quad',
         x0: rig.tipX, y0: rig.tipY,
-        cx: (rig.tipX + hookX) * 0.5, cy: (rig.tipY + hookY) * 0.5 + 3 + lp * 8,
-        x1: hookX, y1: hookY,
+        cx: (rig.tipX + tailX) * 0.5 + 4, cy: (rig.tipY + tailY) * 0.5 + 5 + lp * 6,
+        x1: tailX, y1: tailY,
         c: '#cbd5e1', a: clamp(1 - lp * 0.92, 0.08, 1),
       });
     }
+  }
 
-    const ix = Math.round(fx - imgW / 2);
-    const iy = Math.round(fy - imgH / 2);
-    extraOps.push({ op: 'img', id: fishId, mode, x: ix, y: iy, dw: imgW, dh: imgH });
-    for (let ry = 0; ry < imgH; ry++) {
-      for (let rx = 0; rx < imgW; rx++) {
-        const ch = grid[ry][rx];
-        if (ch === '.') continue;
-        const k = `${ix + rx},${iy + ry}`;
-        fishPx.add(k);
-        rgbMap.set(k, PALETTE[ch]);
-      }
+  // Wet puddle on back of dock
+  if (land.showPuddle) {
+    const pudW = Math.min(Math.round(land.w * 0.88), Math.max(12, Math.round(g.pierEndX * 0.6)));
+    const pudX = Math.max(1, Math.round(land.restX - pudW * 0.5));
+    extraOps.push({ op: 'rect', x: pudX, y: g.pierY, w: pudW, h: 1, c: '#38bdf8', a: 0.45 });
+  }
+
+  // Speed afterimage ghosts during overhead launch
+  if (land.ghosts) {
+    for (let i = land.ghosts.length - 1; i >= 0; i--) {
+      const gh = land.ghosts[i];
+      const gg = getFishGrid(fishId, gh.mode);
+      extraOps.push({
+        op: 'img', id: fishId, mode: gh.mode,
+        x: Math.round(gh.x - gg[0].length / 2),
+        y: Math.round(gh.y - gg.length / 2),
+        a: gh.alpha,
+      });
     }
-    if (t >= 0.62) {
-      const rx = Math.round(rig.reelX), ry = Math.round(rig.reelY);
-      extraOps.push({ op: 'rect', x: rx, y: ry, w: 2, h: 1, c: '#ffe0c4', a: 1 });
-      extraOps.push({ op: 'rect', x: rx + 1, y: ry + 1, w: 2, h: 1, c: '#f0b58b', a: 1 });
-      extraOps.push({ op: 'rect', x: rx, y: ry + 1, w: 1, h: 1, c: '#c2815d', a: 1 });
-      for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 2; dx++) handPx.add(`${rx + dx},${ry + dy}`);
+  }
+
+  // Impact comic starburst on dock slam!
+  if (land.impactFlash) {
+    const imp = land.impactFlash;
+    const p = clamp(imp.progress, 0, 1);
+    const ix = Math.round(imp.x), iy = Math.round(imp.y);
+    const rad = Math.round(lerp(3, imp.big ? 20 : 10, p));
+    extraOps.push({ op: 'rect', x: ix - rad, y: iy, w: 3, h: 1, c: '#fef08a', a: clamp(1 - p, 0, 0.9) });
+    extraOps.push({ op: 'rect', x: ix + rad - 2, y: iy, w: 3, h: 1, c: '#fef08a', a: clamp(1 - p, 0, 0.9) });
+    if (p < 0.65) {
+      const rl = Math.round(lerp(4, 15, p));
+      extraOps.push({ op: 'line', x0: ix - 2, y0: iy, x1: ix - rl, y1: iy - Math.round(rl * 0.65), c: '#fde047', a: 0.9 });
+      extraOps.push({ op: 'line', x0: ix + 2, y0: iy, x1: ix + rl, y1: iy - Math.round(rl * 0.65), c: '#fde047', a: 0.9 });
+      extraOps.push({ op: 'line', x0: ix, y0: iy - 1, x1: ix, y1: iy - rl, c: '#ffffff', a: 0.95 });
+    }
+  }
+
+  // Main fish sprite
+  const grid = getFishGrid(fishId, land.mode);
+  const imgW = grid[0].length;
+  const imgH = grid.length;
+  const ix = Math.round(land.x - imgW / 2);
+  let iy = Math.round(land.y - imgH / 2);
+  if (ix <= g.pierEndX + 1 && iy + imgH > g.pierY) iy = g.pierY - imgH;
+  extraOps.push({ op: 'img', id: fishId, mode: land.mode, x: ix, y: iy, a: 1 });
+
+  for (let ry = 0; ry < imgH; ry++) {
+    for (let rx = 0; rx < imgW; rx++) {
+      const ch = grid[ry][rx];
+      if (ch === '.') continue;
+      fishPx.add(`${ix + rx},${iy + ry}`);
+    }
+  }
+
+  // Dizzy stars over stunned fish on back of dock
+  if (land.showDizzyStars) {
+    const sx0 = land.x + (land.mode === 'right' ? imgW * 0.25 : -imgW * 0.25);
+    const sy0 = Math.max(4, iy - 4);
+    for (let i = 0; i < 3; i++) {
+      const a = g.time * 5.4 + i * ((Math.PI * 2) / 3);
+      const ox = Math.round(sx0 + Math.cos(a) * 6.5);
+      const oy = Math.round(sy0 + Math.sin(a) * 2.2);
+      extraOps.push({ op: 'rect', x: ox, y: oy, w: 1, h: 1, c: '#fef9c3', a: 1 });
+      extraOps.push({ op: 'rect', x: ox - 1, y: oy, w: 1, h: 1, c: '#facc15', a: 0.85 });
+      extraOps.push({ op: 'rect', x: ox + 1, y: oy, w: 1, h: 1, c: '#facc15', a: 0.85 });
     }
   }
 
@@ -258,30 +280,22 @@ export function rasterizeFrame(fishId, st) {
   const bodyNoclips = [];
   const headNoclips = [];
   const pierNoclips = [];
-  let handTouchesFish = false;
-
   for (const k of fishPx) {
     if (anglerHeadPx.has(k)) headNoclips.push(k);
     if (anglerBodyPx.has(k)) bodyNoclips.push(k);
     if (pierPx.has(k)) pierNoclips.push(k);
-    if (handPx.has(k)) handTouchesFish = true;
-  }
-  // Check 1px neighborhood for hand-to-fish touch
-  if (!handTouchesFish) {
-    for (const hk of handPx) {
-      const [x, y] = hk.split(',').map(Number);
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (fishPx.has(`${x + dx},${y + dy}`)) handTouchesFish = true;
-        }
-      }
-    }
   }
 
+  const fishMinX = ix;
+  const fishMaxX = ix + imgW - 1;
+  const backDockVisible = (t >= 0.56 || isCaught)
+    ? (fishMinX >= 0 && fishMaxX < Math.round(rig.backFootX - 1))
+    : true;
+
   return {
-    g, rig, angOps, extraOps,
+    g, rig, land, angOps, extraOps,
     bodyNoclips, headNoclips, pierNoclips,
-    handTouchesFish,
+    backDockVisible, fishMinX, fishMaxX,
   };
 }
 
@@ -325,19 +339,19 @@ function writePng(filePath, w, h, buf) {
   fs.writeFileSync(filePath, png);
 }
 
-// Render multi-species screenshot sheet (action view OR noclip collision heatmap!)
+// Render multi-species screenshot sheet covering FULL BACK OF DOCK (x=0) -> ANGLER -> OPEN WATER (x=148)!
 export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap = false, scale = 2 } = {}) {
-  const viewX0 = 36; // camera crop: x = 36..156 (120px wide, shows full angler + pier edge + 56px Kraken!)
-  const viewY0 = 16; // y = 16..100 (84px tall)
-  const VW = 120;
-  const VH = 84;
+  const viewX0 = 0;
+  const viewY0 = 0;
+  const VW = 148;
+  const VH = 92;
   const CW = VW * scale;
   const CH = VH * scale;
   const W = CW * sampleTs.length;
   const H = CH * speciesList.length;
   const buf = Buffer.alloc(W * H * 3);
   for (let i = 0; i < W * H; i++) {
-    buf[i * 3] = 24; buf[i * 3 + 1] = 56; buf[i * 3 + 2] = 96;
+    buf[i * 3] = 28; buf[i * 3 + 1] = 66; buf[i * 3 + 2] = 112;
   }
 
   const put = (px, py, rgb, a = 1) => {
@@ -355,11 +369,9 @@ export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap 
     const lx = wx - viewX0;
     const ly = wy - viewY0;
     if (lx < 0 || lx >= VW || ly < 0 || ly >= VH) return;
-    for (let dy = 0; dy < scale; dy++) {
-      for (let dx = 0; dx < scale; dx++) {
+    for (let dy = 0; dy < scale; dy++)
+      for (let dx = 0; dx < scale; dx++)
         put(ox + lx * scale + dx, oy + ly * scale + dy, rgb, a);
-      }
-    }
   };
 
   let totalBodyNoclips = 0;
@@ -374,15 +386,15 @@ export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap 
       totalBodyNoclips += res.bodyNoclips.length;
       totalPierNoclips += res.pierNoclips.length;
 
-      // Draw water background
+      // Water background
       for (let wy = res.g.waterY; wy < viewY0 + VH; wy++) {
         for (let wx = viewX0; wx < viewX0 + VW; wx++) {
           putCell(ox, oy, wx, wy, wy === res.g.waterY ? [56, 130, 186] : [16, 48, 84]);
         }
       }
-      // Draw pier pilings & wooden deck planks (exact pierEndX=76, pierY=62..66)
+      // Pier pilings & wooden deck planks (exact pierEndX=90, pierY=62..66)
       for (let wy = res.g.pierY + 5; wy < viewY0 + VH; wy++) {
-        for (const px of [44, 45, 46, 71, 72, 73]) putCell(ox, oy, px, wy, [74, 44, 24]);
+        for (const px of [12, 13, 14, 38, 39, 40, 62, 63, 64, 84, 85, 86]) putCell(ox, oy, px, wy, [74, 44, 24]);
       }
       for (let wy = res.g.pierY; wy <= res.g.pierY + 4; wy++) {
         for (let wx = viewX0; wx <= res.g.pierEndX; wx++) {
@@ -417,11 +429,12 @@ export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap 
             }
           } else if (op.op === 'img') {
             const grid = getFishGrid(op.id, op.mode);
+            const a = op.a ?? 1;
             for (let ry = 0; ry < grid.length; ry++) {
               for (let rx = 0; rx < grid[ry].length; rx++) {
                 const ch = grid[ry][rx];
                 if (ch === '.') continue;
-                putCell(ox, oy, Math.round(op.x) + rx, Math.round(op.y) + ry, hexRgb(PALETTE[ch]));
+                putCell(ox, oy, Math.round(op.x) + rx, Math.round(op.y) + ry, hexRgb(PALETTE[ch]), a);
               }
             }
           }
@@ -431,7 +444,7 @@ export function renderScreenshotSheet(outPath, speciesList, sampleTs, { heatmap 
       drawOps(res.angOps);
       drawOps(res.extraOps);
 
-      // Heatmap overlay: MAGENTA = body/head noclip, BRIGHT RED = pier noclip!
+      // Heatmap overlay: MAGENTA = body/head/hat noclip, BRIGHT RED = pier noclip!
       if (heatmap) {
         for (const k of res.bodyNoclips) {
           const [wx, wy] = k.split(',').map(Number);

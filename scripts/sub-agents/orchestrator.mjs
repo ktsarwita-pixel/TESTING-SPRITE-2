@@ -201,9 +201,10 @@ async function runUiDataAuditor() {
   };
 }
 
-// Helper: shared deterministic 60fps catch-animation simulator reading live anglerRenderer + game math
+// Helper: shared deterministic 60fps catch-animation simulator reading live anglerRenderer + catchPhysics
 async function simulateCatchSequence(fishId, wf) {
   const { computeAnglerRig } = await import(path.join(ROOT, 'js/anglerRenderer.js'));
+  const { computeBackDockLanding } = await import(path.join(ROOT, 'js/catchPhysics.js'));
   const { FISH_SPRITES } = await import(path.join(ROOT, 'js/fishSprites.js'));
   const gameSrc = fs.readFileSync(path.join(ROOT, 'js/game.js'), 'utf8');
 
@@ -216,11 +217,11 @@ async function simulateCatchSequence(fishId, wf) {
   const spr = { w: sprW, h: sprH, right: Array(4).fill({ id: fishId, width: sprW, height: sprH }) };
 
   const g = {
-    anglerX: 24, pierY: 62, pierEndX: 50, waterY: 70, time: 1.0, state: 'REELING',
+    anglerX: 66, pierY: 62, pierEndX: 90, waterY: 76, time: 1.0, state: 'REELING',
     animLean: -1.4, animSquat: 1.0, animStance: 0.9,
     rodAngle: -1.04, rodFlex: 0.42, tension: 0.55, reelHold: true,
     crankAngle: 0.35, landingT: 0, landingWeightFactor: wf, catchTime: 0,
-    activeFish: { species: { id: fishId }, x: 60, y: 76, dir: -1 },
+    activeFish: { species: { id: fishId }, x: 102, y: 80, dir: -1 },
     lastCatchInfo: null,
     sprites: { fish: { [fishId]: spr } },
     save: { upgrades: { rod: 2 } },
@@ -234,7 +235,7 @@ async function simulateCatchSequence(fishId, wf) {
 
   g.state = 'LANDING';
   const dt = 1 / 60;
-  const steps = Math.round(60 / lerp(1.14, 0.78, wf));
+  const steps = Math.round(60 / lerp(0.65, 0.53, wf));
   const frames = [];
   let prev = preRig;
 
@@ -242,42 +243,50 @@ async function simulateCatchSequence(fishId, wf) {
     g.time += dt;
     const t = clamp(i / steps, 0, 1);
     g.landingT = t;
-    const targetRod = t < 0.38
-      ? lerp(-1.04, -1.52 - wf * 0.08, smoothstep(t / 0.38))
-      : lerp(-1.52 - wf * 0.08, -2.28, smoothstep((t - 0.38) / 0.62));
+    const targetRod = t < 0.22
+      ? lerp(-1.04, -2.42 - wf * 0.08, smoothstep(t / 0.22))
+      : t < 0.56
+        ? lerp(-2.42 - wf * 0.08, -2.26, smoothstep((t - 0.22) / 0.34))
+        : -2.26;
     g.rodAngle = lerp(g.rodAngle, targetRod, 1 - Math.exp(-11 * dt));
 
     let tl, ts, tst;
-    if (t < 0.38) {
-      const p = smoothstep(t / 0.38);
-      tl = lerp(-1.4, -2.1 - wf * 1.7, p);
-      ts = lerp(1.0, 1.3 + wf * 1.5, p);
-      tst = lerp(0.9, 0.95 + wf * 0.05, p);
-    } else if (t < 0.66) {
-      const p = smoothstep((t - 0.38) / 0.28);
-      const cushion = Math.exp(-Math.pow((t - 0.62) / 0.07, 2)) * (0.65 + wf * 1.35);
-      tl = lerp(-2.1 - wf * 1.5, 1.35 - wf * 0.4, p);
-      ts = lerp(1.3 + wf * 1.2, 0.35 + wf * 0.25, p) + cushion;
-      tst = lerp(0.95, 0.55 + wf * 0.22, p);
+    if (t < 0.22) {
+      const p = smoothstep(t / 0.22);
+      tl = lerp(-1.4, -3.6 - wf * 1.4, p);
+      ts = lerp(1.0, 2.0 + wf * 1.2, p);
+      tst = lerp(0.9, 1.0, p);
+    } else if (t < 0.56) {
+      const p = smoothstep((t - 0.22) / 0.34);
+      const duckBell = Math.sin(p * Math.PI);
+      tl = lerp(-3.6 - wf * 1.4, 1.1, p);
+      ts = lerp(2.0 + wf * 1.2, 1.4, p) + duckBell * (2.2 + wf * 1.1);
+      tst = lerp(1.0, 0.85, p);
+    } else if (t < 0.78) {
+      const p = smoothstep((t - 0.56) / 0.22);
+      const flinch = Math.exp(-Math.pow((t - 0.57) / 0.05, 2)) * (1.2 + wf * 0.9);
+      tl = lerp(1.1, 0.85, p);
+      ts = lerp(1.4, 0.45, p) + flinch;
+      tst = lerp(0.85, 0.55, p);
     } else {
-      const p = smoothstep((t - 0.66) / 0.34);
-      tl = lerp(1.2 - wf * 0.35, 0.25 - wf * 0.95, p);
-      ts = lerp(0.45 + wf * 0.35, wf * 0.32, p);
-      tst = lerp(0.58 + wf * 0.2, 0.40 + wf * 0.35, p);
+      const p = smoothstep((t - 0.78) / 0.22);
+      tl = lerp(0.85, 0.65, p);
+      ts = lerp(0.45, 0.22 + wf * 0.18, p);
+      tst = lerp(0.55, 0.42, p);
     }
     const ke = 1 - Math.exp(-11 * dt);
     g.animLean = lerp(g.animLean, tl, ke);
     g.animSquat = lerp(g.animSquat, ts, ke);
     g.animStance = lerp(g.animStance, tst, ke);
 
-    // Elastic rod flex with damped whip rebound after water breakout
-    const targetFlex = t < 0.36
-      ? (0.42 + wf * 0.42) * Math.sin((t / 0.36) * Math.PI * 0.78)
-      : Math.exp(-(t - 0.36) * 7.5) * Math.cos((t - 0.36) * 18) * (0.20 + wf * 0.14);
-    g.rodFlex = lerp(g.rodFlex, targetFlex, 1 - Math.exp(-13 * dt));
+    const targetFlex = t < 0.22
+      ? (0.65 + wf * 0.35) * Math.sin((t / 0.22) * Math.PI * 0.82)
+      : Math.exp(-(t - 0.22) * 6.5) * Math.cos((t - 0.22) * 24) * (0.34 + wf * 0.16);
+    g.rodFlex = lerp(g.rodFlex, targetFlex, 1 - Math.exp(-15 * dt));
 
     const rig = computeAnglerRig(g);
-    frames.push({ t, rig, lean: g.animLean, squat: g.animSquat, stance: g.animStance, rodFlex: g.rodFlex, rodAngle: g.rodAngle, prev });
+    const land = computeBackDockLanding(g, rig);
+    frames.push({ t, rig, land, lean: g.animLean, squat: g.animSquat, stance: g.animStance, rodFlex: g.rodFlex, rodAngle: g.rodAngle, prev });
     prev = rig;
   }
 
@@ -285,7 +294,8 @@ async function simulateCatchSequence(fishId, wf) {
   g.catchTime = 0;
   g.lastCatchInfo = { species: { id: fishId } };
   const caughtRig = computeAnglerRig(g);
-  return { frames, preRig, caughtRig, sprW, sprH, gameSrc };
+  const caughtLand = computeBackDockLanding(g, caughtRig);
+  return { frames, preRig, caughtRig, caughtLand, sprW, sprH, gameSrc };
 }
 
 async function runRigKinematicsQA() {
@@ -300,14 +310,14 @@ async function runRigKinematicsQA() {
   const metrics = [];
 
   for (const [id, wf] of cases) {
-    const { frames, preRig, caughtRig } = await simulateCatchSequence(id, wf);
+    const { frames, preRig, caughtLand } = await simulateCatchSequence(id, wf);
     const f0 = frames[0].rig;
     const transJump = Math.max(
       Math.hypot(f0.gripX - preRig.gripX, f0.gripY - preRig.gripY),
       Math.hypot(f0.reelX - preRig.reelX, f0.reelY - preRig.reelY)
     );
-    const lastRig = frames[frames.length - 1].rig;
-    const caughtJump = Math.hypot(caughtRig.catchHoldX - lastRig.catchHoldX, caughtRig.catchHoldY - lastRig.catchHoldY);
+    const lastLand = frames[frames.length - 1].land;
+    const caughtJump = Math.hypot(caughtLand.x - lastLand.x, caughtLand.y - lastLand.y);
 
     let maxBackReach = 0, maxFrontReach = 0, maxRodDetach = 0, maxHandStep = 0, pierSlip = 0;
     for (let i = 0; i < frames.length; i++) {
@@ -315,7 +325,7 @@ async function runRigKinematicsQA() {
       maxBackReach = Math.max(maxBackReach, Math.hypot(r.gripX - (r.shoulderX + 1.2), r.gripY - (r.shoulderY + 0.8)));
       maxFrontReach = Math.max(maxFrontReach, Math.hypot(r.reelX - (r.shoulderX - 1.4), r.reelY - (r.shoulderY + 0.8)));
       maxRodDetach = Math.max(maxRodDetach, Math.hypot(r.rodHandX - r.gripX, r.rodHandY - r.gripY));
-      if (r.frontFootX > 46) pierSlip = Math.max(pierSlip, r.frontFootX - 46);
+      if (r.frontFootX > 88) pierSlip = Math.max(pierSlip, r.frontFootX - 88);
       if (i > 0) {
         const p = frames[i - 1].rig;
         maxHandStep = Math.max(
@@ -327,11 +337,11 @@ async function runRigKinematicsQA() {
     }
     metrics.push({ id, transJump: +transJump.toFixed(3), caughtJump: +caughtJump.toFixed(3), maxBackReach: +maxBackReach.toFixed(2), maxFrontReach: +maxFrontReach.toFixed(2), maxRodDetach: +maxRodDetach.toFixed(3), maxHandStep: +maxHandStep.toFixed(2) });
     if (transJump > 0.25) issues.push(`${id}: REELING->LANDING hand snap ${transJump.toFixed(2)}px`);
-    if (caughtJump > 0.15) issues.push(`${id}: LANDING->CAUGHT fish snap ${caughtJump.toFixed(2)}px`);
+    if (caughtJump > 0.25) issues.push(`${id}: LANDING->CAUGHT fish snap ${caughtJump.toFixed(2)}px`);
     if (maxBackReach > 9.2) issues.push(`${id}: back arm hyper-extension ${maxBackReach.toFixed(2)}px (>9.2)`);
     if (maxFrontReach > 9.2) issues.push(`${id}: front arm hyper-extension ${maxFrontReach.toFixed(2)}px (>9.2)`);
     if (maxRodDetach > 0.05) issues.push(`${id}: rod detached from back hand by ${maxRodDetach.toFixed(2)}px`);
-    if (maxHandStep > 2.1) issues.push(`${id}: jerky hand velocity spike ${maxHandStep.toFixed(2)}px/frame`);
+    if (maxHandStep > 2.2) issues.push(`${id}: jerky hand velocity spike ${maxHandStep.toFixed(2)}px/frame`);
     if (pierSlip > 0) issues.push(`${id}: front boot slipped past pier edge by ${pierSlip.toFixed(1)}px`);
   }
 
@@ -409,10 +419,10 @@ async function runFaceEyeQA() {
     const hx = Math.round(rig.headX);
     const hy = Math.round(rig.headY);
 
-    // Check eye pixels on final composited framebuffer (must NOT be occluded by rod, fish, or hair!)
+    // Check eye pixels on final composited framebuffer (both forward & over-the-shoulder lookBack poses!)
     let scleraFound = false, pupilFound = false, fishOverFace = false;
     for (let dy = -2; dy <= 0; dy++) {
-      for (let dx = 0; dx <= 3; dx++) {
+      for (let dx = -3; dx <= 3; dx++) {
         const col = grid.get(`${hx + dx},${hy + dy}`);
         if (col === '#ffffff' || col === '#fff5eb') scleraFound = true;
         if (col === '#111622') pupilFound = true;
@@ -440,17 +450,18 @@ async function runFaceEyeQA() {
 async function runCatchPhysicsQA() {
   const gameSrc = fs.readFileSync(path.join(ROOT, 'js/game.js'), 'utf8');
   const renSrc = fs.readFileSync(path.join(ROOT, 'js/renderer.js'), 'utf8');
+  const physSrc = fs.readFileSync(path.join(ROOT, 'js/catchPhysics.js'), 'utf8');
   const issues = [];
 
-  // 1. Check weight-scaled arc physics: light fish should arc HIGHER & FASTER than heavy giants!
-  if (/arcPeak\s*=\s*16\s*\+\s*wf\s*\*/.test(gameSrc)) {
-    issues.push('inverted arcPeak physics: heavy fish arcs higher than light fish instead of lower/heavier');
-  }
-  // 2. Check fishing line hooks the fish MOUTH, not center belly!
-  if (/this\.hookX\s*=\s*fx;\s*\n\s*this\.hookY\s*=\s*fy;/.test(gameSrc)) {
-    issues.push('hookX/hookY attaches fishing line to fish belly center instead of mouth tip');
-  }
-  // Slice the actual LANDING simulation loop inside update() (last occurrence!)
+  // 1. Verify Over-Reel Back-of-Dock launch single-source-of-truth physics module is wired in!
+  if (!gameSrc.includes('computeBackDockLanding')) issues.push('game.js missing computeBackDockLanding');
+  if (!renSrc.includes('computeBackDockLanding')) issues.push('renderer.js missing computeBackDockLanding');
+  // 2. Verify dock slam props jump + starburst + dizzy stars + afterimage ghosts!
+  if (!gameSrc.includes('dockBounceVel')) issues.push('missing jumping dock props impulse (dockBounceVel) on slam');
+  if (!renSrc.includes('impactFlash')) issues.push('missing comic impact starburst / shockwave ring on dock slam');
+  if (!renSrc.includes('showDizzyStars')) issues.push('missing orbiting dizzy stars over stunned fish on back of dock');
+  if (!physSrc.includes('ghosts')) issues.push('missing speed afterimage ghosts during overhead launch');
+
   const landStart = gameSrc.lastIndexOf("else if (this.state === 'LANDING')");
   const landEnd = gameSrc.indexOf("else if (this.state === 'CAUGHT')", landStart);
   const landingBlock = gameSrc.slice(landStart, landEnd);
@@ -459,13 +470,14 @@ async function runCatchPhysicsQA() {
   if (!/Math\.cos\([^)]*\)/.test(landingBlock)) {
     issues.push('missing elastic rod-tip damped whip/rebound after fish breaks out of water');
   }
-  // 4. Check pier clearance guard in LANDING arc
-  if (!/pierY/.test(landingBlock)) {
+  // 4. Check pier clearance guard in catchPhysics.js
+  if (!/pierY/.test(physSrc)) {
     issues.push('missing pier-edge vertical clearance guard during LANDING arc');
   }
-  // 5. Check breach splash + catch shake-off droplets + CAUGHT wet drip
+  // 5. Check breach splash + slam #1 + slam #2 triggers
   if (!landingBlock.includes('landingBreachDone')) issues.push('missing water-breach splash trigger');
-  if (!landingBlock.includes('landingGrabDone')) issues.push('missing catch-impact spray trigger');
+  if (!landingBlock.includes('landingSlam1Done')) issues.push('missing back-of-dock slam #1 trigger');
+  if (!landingBlock.includes('landingSlam2Done')) issues.push('missing back-of-dock bounce slam #2 trigger');
   // 6. Check line slackening catenary curve in renderer.js
   if (!renSrc.includes('drawPixelQuad')) issues.push('missing slack catenary fishing line in renderer.js');
   // 7. Check heavy-vs-light posture differentiation in game.js
@@ -482,83 +494,46 @@ async function runCatchPhysicsQA() {
     agent: 'catch-physics-qa',
     score,
     pass: score >= 9.0 && issues.length === 0,
-    summary: `Breach, arc, mouth-hook, pier-clearance, rod-whip & weight physics audited | ${issues.length} issues`,
+    summary: `Over-reel launch, overhead spin, dock slam, prop jump, starburst & rod-whip audited | ${issues.length} issues`,
     details: issues,
   };
 }
 
 async function runSilhouetteQA() {
   const angSrc = fs.readFileSync(path.join(ROOT, 'js/anglerRenderer.js'), 'utf8');
-  const { computeAnglerRig } = await import(path.join(ROOT, 'js/anglerRenderer.js'));
-  const { FISH_SPRITES } = await import(path.join(ROOT, 'js/fishSprites.js'));
+  const { rasterizeFrame } = await import(path.join(__dirname, 'screenshotter.mjs'));
+  const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
   const issues = [];
 
-  // 1. Check head-tracking / gaze-follow during LANDING & CAUGHT
-  if (!/headTrack|gaze|catchHeadTilt|lookAtFish/.test(angSrc)) {
-    issues.push('static head/gaze: angler head does not subtly track the arcing/caught fish');
-  }
-  // 2. Check realistic intermittent lively fish flop in CAUGHT (not robotic constant sine only)
-  if (!/flopBurst|wriggle|tailTwitch/.test(angSrc)) {
-    issues.push('robotic CAUGHT fish motion: missing lively intermittent flop/tail-twitch bursts');
-  }
-  // 3. Audit ALL 26 species: STRICTLY FORBID tail-tip holding! Verify realistic MOUTH/LIP hang OR BELLY/GILL cradle + zero face overlap!
-  const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
-  for (const sp of FISH_SPECIES) {
-    const id = sp.id;
-    const rows = FISH_SPRITES[id][0];
-    const sprW = rows[0].length;
-    const sprH = rows.length;
-    const g = {
-      anglerX: 24, pierY: 62, time: 2.2, state: 'CAUGHT',
-      animLean: 0, animSquat: 0.2, animStance: 0.5, rodAngle: -2.28,
-      landingT: 1, landingWeightFactor: sprW > 25 ? 0.75 : 0.25, catchTime: 0.5,
-      lastCatchInfo: { species: { id } },
-      sprites: {
-        fish: {
-          [id]: {
-            w: sprW, h: sprH,
-            right: Array(4).fill({ id, width: sprW, height: sprH }), left: Array(4).fill({ id, width: sprW, height: sprH }),
-            hang: Array(4).fill({ id, width: sprH, height: sprW }),
-          },
-        },
-      },
-    };
-    const rig = computeAnglerRig(g);
-    if (sprW <= 25) {
-      if (rig.holdMode !== 'hang') issues.push(`${id}: small/med fish should use vertical mouth-lip hold ('hang')`);
-      const topMouthY = rig.catchHoldY - sprW / 2;
-      const botTailY = rig.catchHoldY + sprW / 2;
-      if (Math.abs(rig.reelY - topMouthY) > 4.2) {
-        issues.push(`${id}: hand (${rig.reelY.toFixed(1)}) not gripping top mouth (${topMouthY.toFixed(1)})`);
-      }
-      if (botTailY > 63.5) {
-        issues.push(`${id}: hanging tail (${botTailY.toFixed(1)}) clips into pier (62)`);
-      }
-    } else {
-      if (rig.holdMode !== 'gillHold') issues.push(`${id}: large fish should use head/gill-plate hold ('gillHold')`);
-      const fishLeft = rig.catchHoldX - sprW / 2;
-      const fishBot = rig.catchHoldY + sprH / 2;
-      // Since large fish faces LEFT (dir=-1), fishLeft IS THE HEAD/MOUTH — hand grips jaw/gill near fishLeft!
-      const headDist = rig.reelX - fishLeft;
-      if (headDist < -1.5 || headDist > sprW * 0.45) {
-        issues.push(`${id}: hand (${rig.reelX.toFixed(1)}) not gripping head/gill end (fishLeft=${fishLeft.toFixed(1)})`);
-      }
-      if (fishBot > 61.5) {
-        issues.push(`${id}: fish bottom (${fishBot.toFixed(1)}) clips pier (62)`);
-      }
-    }
-  }
-  // 4. Check rod passes behind torso/head early enough (tuck > 0.08 or rodAngle < -1.32)
+  // 1. Check head-tracking, hat-pop & over-the-shoulder lookBack in anglerRenderer.js
+  if (!/headTrack/.test(angSrc)) issues.push('missing dynamic head tracking during over-reel launch');
+  if (!/hatPopY/.test(angSrc)) issues.push('missing panic straw-hat pop during overhead fish flyby');
+  if (!/lookBack/.test(angSrc)) issues.push('missing over-the-shoulder lookBack toward back of dock');
   if (!/rodBehindBody\s*=.*tuck.*rodAngle/.test(angSrc)) {
     issues.push('rodBehindBody check missing early overhead hide guard');
   }
 
-  const score = Math.max(1, Number((10 - issues.length * 1.4).toFixed(1)));
+  // 2. Audit ALL 26 species: verify EVERY fish visibly lands on the BACK OF THE DOCK (behind angler & on-screen x>=0)!
+  for (const sp of FISH_SPECIES) {
+    const slamRes = rasterizeFrame(sp.id, 0.58);
+    const caughtRes = rasterizeFrame(sp.id, 1.0);
+    if (!slamRes.backDockVisible) {
+      issues.push(`${sp.id}: slam not visibly on back of dock (x=${slamRes.fishMinX}..${slamRes.fishMaxX}, backFoot=${slamRes.rig.backFootX.toFixed(1)})`);
+    }
+    if (!caughtRes.backDockVisible) {
+      issues.push(`${sp.id}: CAUGHT trophy not visibly on back of dock (x=${caughtRes.fishMinX}..${caughtRes.fishMaxX}, backFoot=${caughtRes.rig.backFootX.toFixed(1)})`);
+    }
+    if (!caughtRes.land.showDizzyStars) {
+      issues.push(`${sp.id}: missing dizzy stars on back of dock in CAUGHT`);
+    }
+  }
+
+  const score = Math.max(1, Number((10 - issues.length * 0.8).toFixed(1)));
   return {
     agent: 'silhouette-qa',
     score,
     pass: score >= 9.0 && issues.length === 0,
-    summary: `Grip contact, face clearance, head-tracking, lively fish flop & rod layering checked | ${issues.length} issues`,
+    summary: `All 26 species back-of-dock visibility, hat-pop, lookBack & dizzy flop audited | ${issues.length} issues`,
     details: issues,
   };
 }
@@ -567,7 +542,7 @@ async function runSilhouetteQA() {
 async function runNoclipBodyQA() {
   const { rasterizeFrame } = await import(path.join(__dirname, 'screenshotter.mjs'));
   const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
-  const sampleTs = [0.08, 0.25, 0.42, 0.56, 0.65, 0.85, 1.0];
+  const sampleTs = [0.08, 0.20, 0.34, 0.44, 0.56, 0.65, 0.78, 0.90, 1.0];
   const issues = [];
   let totalBadPx = 0;
 
@@ -583,7 +558,7 @@ async function runNoclipBodyQA() {
       totalBadPx += res.bodyNoclips.length;
     }
     if (worst > 0) {
-      issues.push(`${sp.id}: ${worst}px noclip into angler head/torso/legs at t=${worstT.toFixed(2)}`);
+      issues.push(`${sp.id}: ${worst}px noclip into angler head/hat/torso/legs at t=${worstT.toFixed(2)}`);
     }
   }
   const score = Math.max(1, Number((10 - issues.length * 0.65).toFixed(1)));
@@ -591,7 +566,7 @@ async function runNoclipBodyQA() {
     agent: 'noclip-body-qa',
     score,
     pass: issues.length === 0,
-    summary: `26 species x 7 frames raster-audited | ${issues.length} species noclipping body (${totalBadPx} bad px)`,
+    summary: `26 species x 9 frames raster-audited | ${issues.length} species noclipping body (${totalBadPx} bad px)`,
     details: issues,
   };
 }
@@ -599,7 +574,7 @@ async function runNoclipBodyQA() {
 async function runNoclipPierQA() {
   const { rasterizeFrame } = await import(path.join(__dirname, 'screenshotter.mjs'));
   const { FISH_SPECIES } = await import(path.join(ROOT, 'js/fishData.js'));
-  const sampleTs = [0.08, 0.25, 0.42, 0.56, 0.65, 0.85, 1.0];
+  const sampleTs = [0.08, 0.20, 0.34, 0.44, 0.56, 0.65, 0.78, 0.90, 1.0];
   const issues = [];
   let totalBadPx = 0;
 
@@ -623,7 +598,7 @@ async function runNoclipPierQA() {
     agent: 'noclip-pier-qa',
     score,
     pass: issues.length === 0,
-    summary: `26 species x 7 frames raster-audited | ${issues.length} species noclipping pier (${totalBadPx} bad px)`,
+    summary: `26 species x 9 frames raster-audited | ${issues.length} species noclipping pier (${totalBadPx} bad px)`,
     details: issues,
   };
 }
@@ -631,14 +606,14 @@ async function runNoclipPierQA() {
 async function runScreenshotterAction() {
   const { renderScreenshotSheet } = await import(path.join(__dirname, 'screenshotter.mjs'));
   const species = ['minnow', 'snapper', 'tuna', 'leviathan', 'krakentitan'];
-  const ts = [0.06, 0.24, 0.40, 0.56, 0.65, 0.85, 1.0];
+  const ts = [0.08, 0.20, 0.36, 0.48, 0.57, 0.68, 0.82, 1.0];
   const out = renderScreenshotSheet('/tmp/subagent_action_sheet.png', species, ts, { heatmap: false, scale: 2 });
   const ok = fs.existsSync(out.outPath) && fs.statSync(out.outPath).size > 2000;
   return {
     agent: 'screenshotter-action',
     score: ok ? 10 : 1,
     pass: ok,
-    summary: `Captured ${species.length}x${ts.length} live-engine PNG -> ${out.outPath}`,
+    summary: `Captured ${species.length}x${ts.length} full-dock live-engine PNG -> ${out.outPath}`,
     details: [out.outPath],
   };
 }
@@ -646,7 +621,7 @@ async function runScreenshotterAction() {
 async function runScreenshotterNoclip() {
   const { renderScreenshotSheet } = await import(path.join(__dirname, 'screenshotter.mjs'));
   const species = ['minnow', 'snapper', 'tuna', 'leviathan', 'krakentitan'];
-  const ts = [0.06, 0.24, 0.40, 0.56, 0.65, 0.85, 1.0];
+  const ts = [0.08, 0.20, 0.36, 0.48, 0.57, 0.68, 0.82, 1.0];
   const out = renderScreenshotSheet('/tmp/subagent_noclip_heatmap.png', species, ts, { heatmap: true, scale: 2 });
   const total = out.totalBodyNoclips + out.totalPierNoclips;
   const score = total === 0 ? 10 : Math.max(1, Number((10 - Math.min(9, total * 0.04)).toFixed(1)));

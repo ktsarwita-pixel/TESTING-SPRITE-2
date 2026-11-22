@@ -1,6 +1,7 @@
 // Crisp 16-bit 2D pixel-art side-POV renderer supporting 5 distinct fishing maps, rich night variations & zero-blur bitmap text.
 import { getMapById } from './maps.js';
 import { computeAnglerRig, renderArticulatedAngler } from './anglerRenderer.js';
+import { computeBackDockLanding } from './catchPhysics.js';
 import { drawPixelText } from './pixelFont.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -1035,7 +1036,9 @@ function renderPierFront(g, ctx, map, pal) {
     }
   }
 
-  // Harbor mooring bollard + perched seagull
+  const propJump = Math.round(g.dockBounceY || 0);
+
+  // Harbor mooring bollard + perched seagull (gull jumps in shock on heavy fish slam!)
   if (map.id === 'harbor' && g.pierEndX >= 68) {
     const bol = g.sprites.props.bollard;
     const bx = 4;
@@ -1044,24 +1047,24 @@ function renderPierFront(g, ctx, map, pal) {
     ctx.fillRect(bx, g.pierY, bol.width, 1);
     ctx.drawImage(bol, bx, by);
     if (pal.night < 0.65) {
-      const gullSpr = g.sprites.props[Math.floor(g.time * 1.1) % 5 === 0 ? 'perchedGull1' : 'perchedGull0'];
-      ctx.drawImage(gullSpr, bx + 1, by - gullSpr.height + 1);
+      const gullSpr = g.sprites.props[(propJump < -1 || Math.floor(g.time * 1.1) % 5 === 0) ? 'perchedGull1' : 'perchedGull0'];
+      ctx.drawImage(gullSpr, bx + 1, by - gullSpr.height + 1 + Math.round(propJump * 1.35));
     }
   }
 
-  // Wooden bait bucket grounded cleanly on pierY
+  // Wooden bait bucket grounded cleanly on pierY (pops into the air on dock slam shockwave!)
   const bucket = g.sprites.props.bucket;
   const bucketX = (map.id === 'harbor' || map.id === 'fjord') && g.pierEndX >= 68 ? Math.max(18, g.pierEndX - 55) : 3;
   ctx.fillStyle = '#1f140d';
   ctx.fillRect(bucketX + 1, g.pierY, bucket.width - 2, 1);
-  ctx.drawImage(bucket, bucketX, g.pierY - bucket.height + 1);
+  ctx.drawImage(bucket, bucketX, g.pierY - bucket.height + 1 + propJump);
 
-  // Red tackle box grounded cleanly on pierY
+  // Red tackle box grounded cleanly on pierY (pops into the air on dock slam shockwave!)
   const box = g.sprites.props.tacklebox;
   const boxX = Math.max(15, g.pierEndX - 34);
   ctx.fillStyle = '#1f140d';
   ctx.fillRect(boxX + 1, g.pierY, box.width - 2, 1);
-  ctx.drawImage(box, boxX, g.pierY - box.height + 1);
+  ctx.drawImage(box, boxX, g.pierY - box.height + 1 + Math.round(propJump * 0.85));
 }
 
 function renderFishes(g, ctx, pal) {
@@ -1240,55 +1243,169 @@ function renderAnglerBioluminescence(ctx, dx, dy, sprW, dir, frame, time, phase,
   ctx.restore();
 }
 
-// Foreground pass for the lifted fish during LANDING: 100% crisp pixel-aligned sprite (zero jagged rotation!),
-// gliding cleanly out of the water straight into the angler's outstretched hand with 0.00px continuity into CAUGHT!
+// Helper to pick the exact lossless pixel sprite frame for any spin/tumble orientation
+function getOrientedFishFrame(sprSet, mode, frameIdx) {
+  const arr =
+    mode === 'hang' && sprSet.hang ? sprSet.hang :
+    mode === 'hangCW' && sprSet.hangCW ? sprSet.hangCW :
+    mode === 'flip' && sprSet.flip ? sprSet.flip :
+    mode === 'left' && sprSet.left ? sprSet.left :
+    sprSet.right;
+  return arr[frameIdx % arr.length];
+}
+
+// Foreground pass for the insane Over-Reel Back-of-Dock Launch (LANDING) AND visible flopping trophy (CAUGHT)!
 function renderLandingFishForeground(g, ctx) {
-  if (g.state !== 'LANDING' || !g.activeFish) return;
-  const f = g.activeFish;
-  const sprSet = g.sprites.fish[f.species.id];
+  const isLanding = g.state === 'LANDING' && g.activeFish;
+  const isCaught = g.state === 'CAUGHT' && g.lastCatchInfo;
+  if (!isLanding && !isCaught) return;
+
+  const sp = isLanding ? g.activeFish.species : g.lastCatchInfo.species;
+  const sprSet = g.sprites.fish[sp.id];
   if (!sprSet) return;
-  const t = g.landingT || 0;
+
   const rig = computeAnglerRig(g);
-  const isHangCaught = t >= 0.62 && rig.holdMode === 'hang' && sprSet.hang && sprSet.hang.length > 0;
-  const dir = f.dir >= 0 ? 1 : -1;
-  const animHz = t < 0.62 ? 15 : 12.5;
-  const frames = isHangCaught ? sprSet.hang : (dir >= 0 ? sprSet.right : sprSet.left);
-  const frame = Math.floor(g.time * animHz) % frames.length;
-  const img = frames[frame];
-  const imgW = img.width || (isHangCaught ? sprSet.h : sprSet.w);
-  const imgH = img.height || (isHangCaught ? sprSet.w : sprSet.h);
+  const land = computeBackDockLanding(g, rig);
+  const t = isLanding ? clamp(g.landingT || 0, 0, 1) : 1;
 
-  const dx = Math.round(f.x - imgW / 2);
-  const dy = Math.round(f.y - imgH / 2);
-
-  if (isHangCaught && rig.catchHoldX - rig.reelX > 2.4) {
-    drawPixelLine(ctx, rig.reelX + 1, rig.reelY, rig.catchHoldX, dy + 1, '#e2e8f0');
-  }
-
-  ctx.drawImage(img, dx, dy);
-  if (!isHangCaught && f.species.id === 'angler') {
-    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, dir, frame, g.time, f.phase, 0.5, 0.4);
-  }
-
-  // Once caught (t >= 0.62), draw realistic foreground gripping fingers (mouth-lip grip OR lower-jaw/gill grip!)
-  if (t >= 0.62) {
-    const rx = Math.round(rig.reelX);
-    const ry = Math.round(rig.reelY);
-    if (isHangCaught) {
-      ctx.fillStyle = '#ffe0c4';
-      ctx.fillRect(rx, ry, 2, 1);
-      ctx.fillStyle = '#f0b58b';
-      ctx.fillRect(rx + 1, ry + 1, 2, 1);
-      ctx.fillStyle = '#c2815d';
-      ctx.fillRect(rx, ry + 1, 1, 1);
-    } else {
-      ctx.fillStyle = '#ffe0c4';
-      ctx.fillRect(rx, ry - 1, 2, 1);
-      ctx.fillStyle = '#f0b58b';
-      ctx.fillRect(rx, ry, 3, 1);
-      ctx.fillStyle = '#c2815d';
-      ctx.fillRect(rx, ry + 1, 2, 1);
+  // 1. Anime/arcade supersonic launch speedlines streaking across the sky during the mega-yank & flyby!
+  if (isLanding && t >= 0.08 && t <= 0.56) {
+    ctx.save();
+    const intensity = Math.sin(((t - 0.08) / 0.48) * Math.PI);
+    for (let i = 0; i < 6; i++) {
+      const seed = (i * 19 + Math.floor(g.time * 24) * 7) % 100;
+      const sx = Math.round(land.x + 8 + (seed % 26) - i * 4);
+      const sy = Math.round(Math.max(4, land.y - 10 + (i - 2.5) * 6));
+      const len = 8 + (i % 3) * 5;
+      ctx.globalAlpha = clamp(intensity * (0.35 + (i % 2) * 0.25), 0, 0.75);
+      drawPixelLine(ctx, sx, sy, sx + len, sy + Math.round(len * 0.35), i % 2 === 0 ? '#fef9c3' : '#e0f2fe');
     }
+    ctx.restore();
+  }
+
+  // 2. Shimmering wet puddle & dynamic contact shadow on the wooden back-of-dock planks!
+  if (land.showPuddle) {
+    ctx.save();
+    const pudW = Math.min(Math.round(sprSet.w * 0.88), Math.max(12, Math.round(g.pierEndX * 0.6)));
+    const pudX = Math.max(1, Math.round(land.restX - pudW * 0.5));
+    // Wet glistening sheen across the wooden planks
+    ctx.globalAlpha = 0.42;
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(pudX, g.pierY, pudW, 1);
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = '#bae6fd';
+    ctx.fillRect(pudX + 2, g.pierY + 1, Math.max(4, pudW - 4), 1);
+
+    // Dynamic fish shadow shrinking as the fish hops/bounces off the dock!
+    const heightOffDeck = Math.max(0, land.restY - land.y);
+    const shScale = clamp(1 - heightOffDeck / 26, 0.32, 1);
+    const shW = Math.max(6, Math.round(land.w * 0.72 * shScale));
+    ctx.globalAlpha = 0.45 * shScale;
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(Math.round(land.x - shW * 0.5), g.pierY, shW, 1);
+    ctx.restore();
+  }
+
+  // 3. Glowing speed afterimage echo trail during the supersonic overhead launch!
+  if (land.ghosts && land.ghosts.length) {
+    const ghostFrame = Math.floor(g.time * 22);
+    for (let i = land.ghosts.length - 1; i >= 0; i--) {
+      const gh = land.ghosts[i];
+      const gImg = getOrientedFishFrame(sprSet, gh.mode, ghostFrame + i);
+      const gx = Math.round(gh.x - gImg.width / 2);
+      const gy = Math.round(gh.y - gImg.height / 2);
+      ctx.save();
+      ctx.globalAlpha = gh.alpha;
+      ctx.drawImage(gImg, gx, gy);
+      ctx.restore();
+    }
+  }
+
+  // 4. 8-ray comic pixel IMPACT STARBURST + expanding shockwave ring on the dock planks!
+  if (land.impactFlash) {
+    const imp = land.impactFlash;
+    const p = clamp(imp.progress, 0, 1);
+    const ix = Math.round(imp.x);
+    const iy = Math.round(imp.y);
+    const maxR = imp.big ? (14 + (g.landingWeightFactor || 0.35) * 14) : 9;
+    const rad = Math.round(lerp(3, maxR, p));
+    ctx.save();
+    // Expanding horizontal shockwave dust ring along the wooden dock!
+    ctx.globalAlpha = clamp(1 - p, 0, 0.95);
+    ctx.fillStyle = imp.big && p < 0.35 ? '#ffffff' : '#fef08a';
+    ctx.fillRect(ix - rad, iy, 3, 1);
+    ctx.fillRect(ix + rad - 2, iy, 3, 1);
+    if (p < 0.65) {
+      // Crisp 6-ray comic starburst exploding upward from slam point!
+      const rayL = Math.round(lerp(4, maxR * 0.85, p));
+      const rayCol = p < 0.28 ? '#ffffff' : '#fde047';
+      drawPixelLine(ctx, ix - 2, iy, ix - rayL, iy - Math.round(rayL * 0.65), rayCol);
+      drawPixelLine(ctx, ix + 2, iy, ix + rayL, iy - Math.round(rayL * 0.65), rayCol);
+      drawPixelLine(ctx, ix, iy - 1, ix, iy - Math.round(rayL * 0.85), '#ffffff');
+      drawPixelLine(ctx, ix - 1, iy, ix - Math.round(rayL * 0.55), iy - rayL, '#7dd3fc');
+      drawPixelLine(ctx, ix + 1, iy, ix + Math.round(rayL * 0.55), iy - rayL, '#7dd3fc');
+    }
+    ctx.restore();
+  }
+
+  // 5. Crisp pixel-art fish sprite (flopping furiously on the back of the dock or cartwheeling mid-air!)
+  const animHz = isLanding ? (land.phase === 'launch' ? 20 : 16) : 14;
+  const frame = Math.floor(g.time * animHz) % sprSet.right.length;
+  const img = getOrientedFishFrame(sprSet, land.mode, frame);
+  const drawW = Math.max(1, Math.round(img.width * (land.squashX || 1)));
+  const drawH = Math.max(1, Math.round(img.height * (land.squashY || 1)));
+  const dx = Math.round(land.x - drawW / 2);
+  // Anchor bottom edge cleanly above pierY even during slam squash!
+  let dy = Math.round(land.y - drawH / 2);
+  if (dx <= g.pierEndX + 1 && dy + drawH > g.pierY) {
+    dy = g.pierY - drawH;
+  }
+
+  if (drawW === img.width && drawH === img.height) {
+    ctx.drawImage(img, dx, dy);
+  } else {
+    ctx.drawImage(img, dx, dy, drawW, drawH);
+  }
+
+  // Keep Anglerfish bioluminescence & mythic/legendary sparkles alive right on the back of the dock!
+  if (sp.id === 'angler' && (land.mode === 'right' || land.mode === 'left')) {
+    renderAnglerBioluminescence(ctx, dx, dy, sprSet.w, land.mode === 'right' ? 1 : -1, frame, g.time, 0, 0.4, 0.35);
+  }
+  if (sp.id === 'krakentitan' || sp.id === 'leviathan' || sp.id === 'celestialcarp') {
+    ctx.save();
+    for (let s = 0; s < 3; s++) {
+      const ang = g.time * 5.2 + s * 2.1;
+      const sx = Math.round(land.x + Math.cos(ang) * (drawW * 0.38));
+      const sy = Math.round(land.y + Math.sin(ang * 1.4) * (drawH * 0.38));
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = s === 0 ? '#fef08a' : s === 1 ? '#5eead4' : '#f9a8d4';
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+    ctx.restore();
+  }
+
+  // 6. Orbiting golden cartoon DIZZY STARS spinning above the stunned fish on the back of the dock!
+  if (land.showDizzyStars) {
+    ctx.save();
+    const headStarX = land.x + (land.mode === 'right' ? drawW * 0.25 : -drawW * 0.25);
+    const headStarY = Math.max(4, dy - 4);
+    for (let i = 0; i < 3; i++) {
+      const a = g.time * 5.4 + i * ((Math.PI * 2) / 3);
+      const ox = Math.round(headStarX + Math.cos(a) * 6.5);
+      const oy = Math.round(headStarY + Math.sin(a) * 2.2);
+      const bright = Math.sin(a) >= -0.1;
+      ctx.globalAlpha = bright ? 0.96 : 0.52;
+      ctx.fillStyle = i % 2 === 0 ? '#fde047' : '#fef9c3';
+      ctx.fillRect(ox, oy, 1, 1);
+      if (bright) {
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(ox - 1, oy, 1, 1);
+        ctx.fillRect(ox + 1, oy, 1, 1);
+        ctx.fillRect(ox, oy - 1, 1, 1);
+        ctx.fillRect(ox, oy + 1, 1, 1);
+      }
+    }
+    ctx.restore();
   }
 }
 
@@ -1466,17 +1583,20 @@ function renderLineAndHook(g, ctx) {
 
   if (g.state === 'LANDING') {
     const t = clamp(g.landingT || 0, 0, 1);
-    if (t < 0.40) {
-      // Taut loaded fishing line pulling the fish's mouth straight out of the water!
-      drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#f1f5f9');
-    } else if (t < 0.58) {
-      // Line smoothly goes slack into a natural catenary droop and fades cleanly before the trophy turn
-      const p = (t - 0.40) / 0.18;
-      const mx = (rod.tipX + g.hookX) * 0.5;
-      const my = (rod.tipY + g.hookY) * 0.5 + 3 + p * 8;
+    if (t < 0.24) {
+      // ULTRA-TAUT overcharged white-gold fishing line yanking the fish straight out of the ocean!
+      drawPixelLine(ctx, rod.tipX, rod.tipY, g.hookX, g.hookY, '#fef08a');
+      drawPixelLine(ctx, rod.tipX, rod.tipY - 1, g.hookX, g.hookY - 1, '#ffffff');
+    } else if (t < 0.46) {
+      // Line whips loose into a dramatic trailing slack catenary behind the recoiling rod tip!
+      const p = (t - 0.24) / 0.22;
+      const tailX = rod.tipX + lerp(16, 4, p);
+      const tailY = rod.tipY + lerp(6, 18, p);
+      const mx = (rod.tipX + tailX) * 0.5 + 4;
+      const my = (rod.tipY + tailY) * 0.5 + 5 + p * 6;
       ctx.save();
       ctx.globalAlpha = clamp(1 - p * 0.92, 0.08, 1);
-      drawPixelQuad(ctx, rod.tipX, rod.tipY, mx, my, g.hookX, g.hookY, '#cbd5e1', 12);
+      drawPixelQuad(ctx, rod.tipX, rod.tipY, mx, my, tailX, tailY, '#cbd5e1', 12);
       ctx.restore();
     }
     return;

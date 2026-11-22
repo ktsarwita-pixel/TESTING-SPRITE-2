@@ -252,12 +252,13 @@ const BASE_PROP_SPRITES = {
 export const PROP_SPRITES = { ...BASE_PROP_SPRITES, ...MAP_PROP_SPRITES };
 
 function makeCanvasFromRows(rows, options = {}) {
-  const { flipX = false, rotateHang = false, silhouetteColor = null } = options;
+  const { flipX = false, rotateHang = false, rotateMode = null, silhouetteColor = null } = options;
+  const mode = rotateMode || (rotateHang ? 'ccw' : null);
   const h = rows.length;
   const w = Math.max(...rows.map((r) => r.length));
   const c = document.createElement('canvas');
-  c.width = rotateHang ? h : w;
-  c.height = rotateHang ? w : h;
+  c.width = (mode === 'ccw' || mode === 'cw') ? h : w;
+  c.height = (mode === 'ccw' || mode === 'cw') ? w : h;
   const ctx = c.getContext('2d');
   for (let y = 0; y < h; y++) {
     const row = rows[y];
@@ -266,11 +267,15 @@ function makeCanvasFromRows(rows, options = {}) {
       const color = PALETTE[ch];
       if (!color) continue;
       ctx.fillStyle = silhouetteColor || color;
-      if (rotateHang) {
-        // Exact lossless 90° CCW pixel transpose: MOUTH (x=w-1) at TOP (dy=0), slim dorsal LEFT (dx=y), belly RIGHT, TAIL DOWN!
-        const dx = y;
-        const dy = w - 1 - x;
-        ctx.fillRect(dx, dy, 1, 1);
+      if (mode === 'ccw') {
+        // Exact lossless 90° CCW pixel transpose: MOUTH (x=w-1) at TOP (dy=0)
+        ctx.fillRect(y, w - 1 - x, 1, 1);
+      } else if (mode === 'cw') {
+        // Exact lossless 90° CW pixel transpose: MOUTH (x=w-1) at BOTTOM
+        ctx.fillRect(h - 1 - y, x, 1, 1);
+      } else if (mode === '180') {
+        // Exact lossless 180° upside-down tumble frame
+        ctx.fillRect(w - 1 - x, h - 1 - y, 1, 1);
       } else {
         const dx = flipX ? w - 1 - x : x;
         ctx.fillRect(dx, y, 1, 1);
@@ -292,7 +297,7 @@ export function buildSpriteCache() {
       canvas: makeCanvasFromRows(spec.rows),
       hand: spec.hand,
       w: spec.rows[0].length,
-      h: spec.rows.length,
+      h: spec.rows[0].length ? spec.rows.length : 0,
     };
   }
 
@@ -300,7 +305,9 @@ export function buildSpriteCache() {
     cache.fish[id] = {
       right: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false })),
       left: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true })),
-      hang: frames.map((rows) => makeCanvasFromRows(rows, { rotateHang: true })),
+      hang: frames.map((rows) => makeCanvasFromRows(rows, { rotateMode: 'ccw' })),
+      hangCW: frames.map((rows) => makeCanvasFromRows(rows, { rotateMode: 'cw' })),
+      flip: frames.map((rows) => makeCanvasFromRows(rows, { rotateMode: '180' })),
       silRight: frames.map((rows) => makeCanvasFromRows(rows, { flipX: false, silhouetteColor: '#0e243d' })),
       silLeft: frames.map((rows) => makeCanvasFromRows(rows, { flipX: true, silhouetteColor: '#0e243d' })),
       logSil: makeCanvasFromRows(frames[0], { flipX: false, silhouetteColor: '#1e293b' }),
