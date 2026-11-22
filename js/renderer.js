@@ -1534,17 +1534,27 @@ function renderLandingFishForeground(g, ctx) {
     const ix = Math.round(imp.x);
     const iy = Math.round(imp.y);
     const wf = imp.wf ?? (g.landingWeightFactor || 0.35);
-    const hw = Math.max(6, Math.round(imp.halfW || 9));
-    const maxR = hw + (imp.big ? (11 + wf * 7) : (7 + wf * 4));
+    const hw = Math.max(5, Math.round(imp.halfW || 9));
+    const hasShock = imp.shockwave !== false && wf >= 0.36;
+    const maxR = hasShock ? (hw + (imp.big ? (11 + wf * 7) : (7 + wf * 4))) : (hw + 4);
     ctx.save();
     const cloudFade = clamp(1 - Math.max(0, p - 0.14) / 0.86, 0, 1);
-    const spread = lerp(hw * 0.65, maxR * 0.92, Math.pow(p, 0.60));
-    const lift = Math.sin(p * Math.PI * 0.85) * (imp.big ? 2.6 + wf * 1.4 : 1.5);
-    const puffR = (imp.big ? 2.5 + wf * 1.1 : 1.7) * (0.65 + 0.45 * Math.sin(p * Math.PI * 0.75));
-    drawPixelDustPuff(ctx, ix - spread, iy - lift * 0.4, puffR, cloudFade * 0.86, true, iy);
-    drawPixelDustPuff(ctx, ix + spread, iy - lift * 0.4, puffR, cloudFade * 0.86, true, iy);
-    drawPixelDustPuff(ctx, ix - spread * 0.58, iy - 1 - lift * 0.8, puffR * 0.72, cloudFade * 0.70, false, iy);
-    drawPixelDustPuff(ctx, ix + spread * 0.58, iy - 1 - lift * 0.8, puffR * 0.72, cloudFade * 0.70, false, iy);
+    if (!hasShock) {
+      // Small fish: subtle tiny wet-plop mist right at the plank — zero heavy shockwave clouds!
+      const spread = lerp(hw * 0.55, hw + 3.0, Math.pow(p, 0.65));
+      const lift = Math.sin(p * Math.PI * 0.85) * 0.9;
+      const puffR = 1.1 * (0.65 + 0.35 * Math.sin(p * Math.PI * 0.75));
+      drawPixelDustPuff(ctx, ix - spread, iy - lift * 0.3, puffR, cloudFade * 0.50, false, iy);
+      drawPixelDustPuff(ctx, ix + spread, iy - lift * 0.3, puffR, cloudFade * 0.50, false, iy);
+    } else {
+      const spread = lerp(hw * 0.65, maxR * 0.92, Math.pow(p, 0.60));
+      const lift = Math.sin(p * Math.PI * 0.85) * (imp.big ? 2.6 + wf * 1.4 : 1.5);
+      const puffR = (imp.big ? 2.5 + wf * 1.1 : 1.7) * (0.65 + 0.45 * Math.sin(p * Math.PI * 0.75));
+      drawPixelDustPuff(ctx, ix - spread, iy - lift * 0.4, puffR, cloudFade * 0.86, true, iy);
+      drawPixelDustPuff(ctx, ix + spread, iy - lift * 0.4, puffR, cloudFade * 0.86, true, iy);
+      drawPixelDustPuff(ctx, ix - spread * 0.58, iy - 1 - lift * 0.8, puffR * 0.72, cloudFade * 0.70, false, iy);
+      drawPixelDustPuff(ctx, ix + spread * 0.58, iy - 1 - lift * 0.8, puffR * 0.72, cloudFade * 0.70, false, iy);
+    }
     ctx.restore();
   }
 
@@ -1584,8 +1594,8 @@ function renderLandingFishForeground(g, ctx) {
     true
   );
 
-  // 7b. FOREGROUND PUNCHY DOCK SLAM BURST (frames OUTSIDE the fish silhouette — crisp, bold, zero clutter!)
-  if (land.impactFlash) {
+  // 7b. FOREGROUND PUNCHY DOCK SLAM BURST (medium/big/giant fish ONLY — small fish cannot make a big dock shockwave!)
+  if (land.impactFlash && land.impactFlash.shockwave !== false && (land.impactFlash.wf ?? (g.landingWeightFactor || 0.35)) >= 0.36) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x);

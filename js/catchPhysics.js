@@ -386,11 +386,28 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
     ? { x: lerp(startX, launchX, 0.55), y: waterY, progress: (t - 0.10) / 0.38, wf }
     : null;
 
+  const isSmallImpact = wf < 0.36;
   let impactFlash = null;
   if (!isCaught && t >= 0.56 && t < 0.75) {
-    impactFlash = { x: fx, y: pierY, progress: (t - 0.56) / 0.19, big: true, wf, halfW: sprW * 0.54 };
-  } else if (!isCaught && t >= 0.76 && t < 0.89) {
-    impactFlash = { x: fx, y: pierY, progress: (t - 0.76) / 0.13, big: false, wf, halfW: sprW * 0.50 };
+    impactFlash = {
+      x: fx,
+      y: pierY,
+      progress: (t - 0.56) / 0.19,
+      big: !isSmallImpact,
+      shockwave: !isSmallImpact,
+      wf,
+      halfW: sprW * 0.54,
+    };
+  } else if (!isCaught && !isSmallImpact && t >= 0.76 && t < 0.89) {
+    impactFlash = {
+      x: fx,
+      y: pierY,
+      progress: (t - 0.76) / 0.13,
+      big: false,
+      shockwave: wf >= 0.55,
+      wf,
+      halfW: sprW * 0.50,
+    };
   }
 
   return {

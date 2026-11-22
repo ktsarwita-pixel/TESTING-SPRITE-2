@@ -309,7 +309,7 @@ export function rasterizeFrame(fishId, st) {
   }
 
   // 5. Grounded rolling dust wisps behind/beside slammed fish
-  if (land.impactFlash) {
+  if (land.impactFlash && land.impactFlash.shockwave !== false && (land.impactFlash.wf ?? 0.35) >= 0.36) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x), iy = Math.round(imp.y);
@@ -385,7 +385,7 @@ export function rasterizeFrame(fishId, st) {
   }
 
   // 6b. Foreground Punchy Dock Slam Burst (framing OUTSIDE the fish silhouette!)
-  if (land.impactFlash) {
+  if (land.impactFlash && land.impactFlash.shockwave !== false && (land.impactFlash.wf ?? 0.35) >= 0.36) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x), iy = Math.round(imp.y);

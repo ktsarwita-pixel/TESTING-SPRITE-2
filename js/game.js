@@ -2294,30 +2294,41 @@ class PierlineGame {
       if (!this.landingSlam1Done && t >= 0.56) {
         this.landingSlam1Done = true;
         this.landingGrabDone = true;
-        this.landingHitstop = 0.042 + wf * 0.024;
+        const isSmallFish = wf < 0.36;
+        this.landingHitstop = isSmallFish ? 0.014 : (0.040 + wf * 0.024);
         sound.playDockSlam(wf, 0, this.panAtX(land.slamX));
-        this.shakeTime = Math.max(this.shakeTime, 0.24 + wf * 0.20);
-        this.shakeMag = Math.max(this.shakeMag, 1.9 + wf * 2.6);
-        // Launch bait bucket, tacklebox & dock props upward from the shockwave!
-        this.dockBounceVel = -(44 + wf * 34);
-        const shout = wf > 0.72 ? 'KABOOM!!' : wf > 0.35 ? 'WHAM!!' : 'SMACK!!';
-        this.spawnFloat(Math.max(24, land.slamX), Math.max(12, this.pierY - land.h - 10), shout, wf > 0.65 ? '#fb7185' : '#fef08a');
-        // Huge radial spray of water droplets + wooden dock splinters + white dust clouds!
+        if (isSmallFish) {
+          // Small fish: soft wet flop on the planks — NO big shockwave, NO jumping tacklebox/bucket/gull!
+          this.shakeTime = Math.max(this.shakeTime, 0.06);
+          this.shakeMag = Math.max(this.shakeMag, 0.4);
+          this.dockBounceVel = 0;
+        } else {
+          this.shakeTime = Math.max(this.shakeTime, 0.20 + wf * 0.24);
+          this.shakeMag = Math.max(this.shakeMag, 1.5 + wf * 3.0);
+          // Only medium/big/giant fish can launch bait bucket, tacklebox & dock props upward!
+          const heavyScale = clamp((wf - 0.36) / 0.64, 0.15, 1.0);
+          this.dockBounceVel = -(26 + heavyScale * 54);
+        }
+        const shout = wf > 0.72 ? 'KABOOM!!' : wf >= 0.36 ? 'WHAM!!' : 'PLOP!';
+        this.spawnFloat(Math.max(24, land.slamX), Math.max(12, this.pierY - land.h - 10), shout, wf > 0.65 ? '#fb7185' : wf >= 0.36 ? '#fef08a' : '#bae6fd');
+        // Water droplets (plus wood splinters & spark spray ONLY for medium/big/giant fish!)
         const map = this.getCurrentMap();
         const splinterCol = map.dockStyle === 'marble' ? '#e2e8f0' : map.dockStyle === 'basalt' ? '#fb923c' : map.dockStyle === 'frost' ? '#bae6fd' : '#c98c50';
-        const burstN = Math.round(18 + wf * 18);
+        const burstN = isSmallFish ? 6 : Math.round(16 + wf * 20);
         for (let i = 0; i < burstN; i++) {
           const ang = -Math.PI * rand(0.08, 0.92);
-          const spd = rand(18, 56 + wf * 28);
+          const spd = isSmallFish ? rand(10, 26) : rand(18, 56 + wf * 28);
           this.particles.push({
             x: land.slamX + rand(-land.w * 0.32, land.w * 0.32),
             y: this.pierY - 1,
             vx: Math.cos(ang) * spd,
-            vy: Math.sin(ang) * spd - rand(4, 16),
+            vy: Math.sin(ang) * spd - (isSmallFish ? rand(2, 7) : rand(4, 16)),
             g: 138,
-            life: rand(0.26, 0.58),
-            size: i % 4 === 0 ? 2 : 1,
-            color: i % 3 === 0 ? splinterCol : i % 3 === 1 ? '#e0f2fe' : '#fde047',
+            life: isSmallFish ? rand(0.18, 0.34) : rand(0.26, 0.58),
+            size: isSmallFish ? 1 : (i % 4 === 0 ? 2 : 1),
+            color: isSmallFish
+              ? (i % 2 === 0 ? '#e0f2fe' : '#bae6fd')
+              : (i % 3 === 0 ? splinterCol : i % 3 === 1 ? '#e0f2fe' : '#fde047'),
           });
         }
       }
@@ -2326,10 +2337,15 @@ class PierlineGame {
       if (!this.landingSlam2Done && t >= 0.75) {
         this.landingSlam2Done = true;
         sound.playDockSlam(wf, 1, this.panAtX(fx));
-        this.shakeTime = Math.max(this.shakeTime, 0.10 + wf * 0.08);
-        this.shakeMag = Math.max(this.shakeMag, 0.9 + wf * 1.1);
-        this.dockBounceVel = Math.min(this.dockBounceVel || 0, -(20 + wf * 16));
-        for (let i = 0; i < Math.round(8 + wf * 8); i++) {
+        const isSmallFish2 = wf < 0.36;
+        if (!isSmallFish2) {
+          this.shakeTime = Math.max(this.shakeTime, 0.09 + wf * 0.09);
+          this.shakeMag = Math.max(this.shakeMag, 0.8 + wf * 1.2);
+          if (wf >= 0.48) {
+            this.dockBounceVel = Math.min(this.dockBounceVel || 0, -(16 + wf * 18));
+          }
+        }
+        for (let i = 0; i < (isSmallFish2 ? 3 : Math.round(8 + wf * 8)); i++) {
           this.particles.push({
             x: fx + rand(-land.w * 0.28, land.w * 0.28),
             y: this.pierY - 1,

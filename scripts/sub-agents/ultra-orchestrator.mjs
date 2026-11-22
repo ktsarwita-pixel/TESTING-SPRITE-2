@@ -373,14 +373,29 @@ const ULTRA_AGENTS = [
       const gameSrc = fs.readFileSync(path.join(ROOT, 'js/game.js'), 'utf8');
       const renSrc = fs.readFileSync(path.join(ROOT, 'js/renderer.js'), 'utf8');
       const issues = [];
-      if (!gameSrc.includes('this.dockBounceVel = -(')) issues.push('Slam does not impulse dockBounceVel');
-      if (!renSrc.includes('dockBounceY')) issues.push('Renderer does not animate dockBounceY on props');
-      const score = clampScore(100 - issues.length * 25);
-      return { score, summary: `Dock shockwave spring physics & jumping bait bucket/tacklebox verified`, issues };
+      if (!gameSrc.includes('this.dockBounceVel = 0;')) issues.push('small fish missing dockBounceVel=0 guard');
+      if (!gameSrc.includes('const isSmallFish = wf < 0.36;')) issues.push('missing small-fish weight gate for dock props');
+      if (!renSrc.includes('const propJump = Math.round(g.dockBounceY || 0)')) issues.push('missing propJump in renderer.js');
+      for (const smId of ['minnow', 'perch', 'clownfish', 'bass']) {
+        const sm = rasterizeFrame(smId, 0.58);
+        if (sm.land.impactFlash && (sm.land.impactFlash.shockwave || sm.land.impactFlash.big)) {
+          issues.push(`${smId} triggered big dock shockwave!`);
+        }
+      }
+      for (const bgId of ['snapper', 'tuna', 'leviathan', 'krakentitan']) {
+        const bg = rasterizeFrame(bgId, 0.58);
+        if (!bg.land.impactFlash || !bg.land.impactFlash.shockwave || !bg.land.impactFlash.big) {
+          issues.push(`${bgId} missing big dock shockwave!`);
+        }
+      }
+      return {
+        score: clampScore(100 - issues.length * 20),
+        summary: 'Small fish keep dock props still (0 jump, 0 shockwave); medium/big fish bounce props & shockwave',
+        issues,
+      };
     },
   },
 
-  // ======================== GROUP D: PIXEL-EXACT NOCLIP & GROUNDING (18-22) ========================
   {
     id: '18-noclip-body-all26-qa',
     group: 'NOCLIP',
