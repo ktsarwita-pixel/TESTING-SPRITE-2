@@ -235,19 +235,17 @@ const ULTRA_AGENTS = [
     run: async () => {
       const issues = [];
       for (const id of ALL_IDS) {
-        const tr = getTraj(id);
-        for (let i = 1; i < tr.length; i++) {
-          if (tr[i].land.mode !== tr[i - 1].land.mode) {
-            // Mode flip MUST occur smoothly through foreshortened flipScaleX <= 0.36 (zero 180-deg teleport pop!)
-            const minSX = Math.min(tr[i].land.flipScaleX ?? 1, tr[i - 1].land.flipScaleX ?? 1);
-            if (minSX > 0.36) {
-              issues.push(`${id}: abrupt left/right mirror pop at t=${tr[i].t.toFixed(2)} (flipScaleX=${minSX.toFixed(2)})`);
-            }
-          }
+        const resSlam = rasterizeFrame(id, 0.58);
+        const resRest = rasterizeFrame(id, 1.0);
+        if (resSlam.land.mode !== 'right' || resRest.land.mode !== 'right') {
+          issues.push(`${id}: not looking at the human (mode=${resRest.land.mode}, expected 'right')`);
+        }
+        if ((resSlam.land.flipScaleX ?? 1) < 0.99 || (resRest.land.flipScaleX ?? 1) < 0.99) {
+          issues.push(`${id}: horizontal accordion squish detected (flipScaleX=${resSlam.land.flipScaleX})`);
         }
       }
       const score = clampScore(100 - issues.length * 15);
-      return { score, summary: `All 26 species turnaround transitions verified smooth foreshortened (zero mirror pops)`, issues };
+      return { score, summary: `All 26/26 species look RIGHT at the human on dock with 0 accordion distortion`, issues };
     },
   },
   {

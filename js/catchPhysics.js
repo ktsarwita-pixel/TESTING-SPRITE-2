@@ -80,7 +80,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
   const isGiant = sprW >= 40;
 
   // Leave generous breathing room behind the angler (even during impact squash!)
-  const maxImpactSX = isGiant ? 1.12 : isBig ? 1.16 : 1.24;
+  const maxImpactSX = isBig ? 1.0 : 1.18;
   const maxSafeBackX = bounds.staticBackSafeX - (sprW * maxImpactSX) * 0.5 - 1.5;
   const restSafeBackX = bounds.staticBackSafeX - sprW * 0.5 - 1.5;
   const minScreenX = sprW * 0.5 + 2.0;
@@ -170,7 +170,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
     const angle = evalLaunchAngle(p);
     // Subtle, natural aerodynamic stretch during launch & dive; relaxed 1.0 at apex!
     const endBoost = Math.pow(Math.abs(p * 2 - 1), 1.5);
-    const stretchAmt = isGiant ? 0.06 : isBig ? 0.09 : 0.12;
+    const stretchAmt = isBig ? 0.0 : 0.08;
     const sx = 1 + stretchAmt * endBoost;
     const sy = 1 - stretchAmt * 0.72 * endBoost;
     const rb = rotatedBounds(sprW, sprH, angle, sx, sy);
@@ -201,7 +201,7 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
       mode = 'left';
       // Smoothly pitches from 0 -> launchPitch so t=0.20 handoff has ZERO angular jump!
       angle = lerp(0, launchPitch, smootherstep(p));
-      const str = Math.sin(u * Math.PI * 0.5) * (isGiant ? 0.06 : isBig ? 0.09 : 0.12);
+      const str = Math.sin(u * Math.PI * 0.5) * (isBig ? 0.0 : 0.08);
       squashX = 1 + str;
       squashY = 1 - str * 0.72;
 
@@ -271,105 +271,73 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
         };
       }
     } else if (t < 0.76) {
-      // BEAT 3: HEAVY BELLY-SLAM #1 + SMOOTH WEIGHTED BOUNCE WITH FORESHORTENED TURNAROUND!
-      // (ZERO abrupt left->right mirror pop, ZERO jagged 360-deg Kraken somersaults!)
+      // BEAT 3: CRISP DOCK SLAM #1 + CLEAN BOUNCE — ALL 26 FISH TURN TO LOOK RIGHT AT THE HUMAN!
+      // ZERO white cutout blob, ZERO accordion pinch, ZERO pixel-row-dropping squash on big fish!
       phase = 'bounce1';
       const b1 = clamp((t - 0.56) / 0.20, 0, 1);
       const midX = lerp(slamX, restX, 0.66);
+      mode = 'right'; // Looking straight at the shocked human!
+      flipScaleX = 1;
 
-      if (b1 < 0.16) {
-        // Tactile belly-slam compression right on the slammed wooden planks!
-        const sp = b1 / 0.16;
+      if (b1 < 0.14) {
         fx = slamX;
         fy = restY;
-        mode = 'left'; // stays 'left' seamlessly through slam contact — ZERO mirror pop!
         angle = 0;
-        const sqAmt = Math.sin(sp * Math.PI);
-        squashX = 1 + (maxImpactSX - 1) * sqAmt;
-        squashY = 1 - (isGiant ? 0.16 : isBig ? 0.22 : 0.28) * sqAmt;
-        hitFlash = !isBig && b1 < 0.055; // crisp 1-frame flash for small fish; big fish keep full crisp art!
+        if (!isBig) {
+          const sqAmt = Math.sin((b1 / 0.14) * Math.PI);
+          squashX = 1 + 0.16 * sqAmt;
+          squashY = 1 - 0.16 * sqAmt;
+        }
+        hitFlash = false; // Zero solid-white cutout glitch — keep full vibrant pixel art!
       } else {
-        // Weighted parabolic rebound hop + smooth foreshortened flip from 'left' -> 'right' across the apex!
-        const airP = (b1 - 0.16) / 0.84;
+        const airP = (b1 - 0.14) / 0.86;
         fx = lerp(slamX, midX, smootherstep(airP));
-        const bounceH1 = lerp(10.5, 5.8, wf);
+        const bounceH1 = lerp(10.0, 5.5, wf);
         fy = restY - Math.sin(airP * Math.PI) * bounceH1;
-
-        if (isBig) {
-          // Big/giant fish stay un-pinched & weighty facing 'left' (ZERO squished-accordion glitch!)
-          mode = 'left';
-          flipScaleX = 1;
-        } else {
-          // Small fish do a nimble foreshortened bounce flip from 'left' -> 'right'
-          const turnWindow = clamp((airP - 0.22) / 0.56, 0, 1);
-          const cosTurn = Math.cos(turnWindow * Math.PI);
-          mode = cosTurn >= 0 ? 'left' : 'right';
-          flipScaleX = Math.max(0.26, Math.abs(cosTurn));
-        }
-
-        // Gentle weighted rock (max +/- 10° for giant, +/- 15° for small — butter-smooth!)
-        const rockMax = isGiant ? 0.14 : isBig ? 0.19 : 0.26;
-        angle = Math.sin(airP * Math.PI * 2) * rockMax * Math.sin(airP * Math.PI);
-
-        // Subtle upward pop stretch right on takeoff
-        if (airP < 0.20) {
-          const tp = airP / 0.20;
-          squashX = lerp(0.92, 1.0, tp);
-          squashY = lerp(1.09, 1.0, tp);
-        }
+        // Pure 1:1 native crisp pixels on big fish (angle = 0 -> ZERO RotSprite boundary flicker on dock!)
+        angle = isBig ? 0 : Math.sin(airP * Math.PI * 2) * 0.18 * Math.sin(airP * Math.PI);
       }
     } else if (t < 0.90) {
-      // BEAT 4: Dampened secondary bounce sliding smoothly onto restX!
+      // BEAT 4: Dampened secondary bounce sliding cleanly onto restX, looking at the human!
       phase = 'bounce2';
       const b2 = clamp((t - 0.76) / 0.14, 0, 1);
       const midX = lerp(slamX, restX, 0.66);
       fx = lerp(midX, restX, smootherstep(b2));
-      const bounceH2 = lerp(4.8, 2.4, wf);
+      const bounceH2 = lerp(4.5, 2.2, wf);
       fy = restY - Math.sin(b2 * Math.PI) * bounceH2;
-      mode = isBig ? 'left' : 'right';
-      const rock2 = isGiant ? 0.08 : isBig ? 0.11 : 0.16;
-      angle = b2 < 0.15 ? 0 : Math.sin(((b2 - 0.15) / 0.85) * Math.PI * 2) * rock2 * Math.sin(b2 * Math.PI);
-      if (b2 < 0.16) {
-        const sp = b2 / 0.16;
-        const amt = Math.sin(sp * Math.PI);
-        squashX = 1 + (isGiant ? 0.06 : 0.12) * amt;
-        squashY = 1 - (isGiant ? 0.06 : 0.11) * amt;
-      }
+      mode = 'right';
+      flipScaleX = 1;
+      angle = isBig ? 0 : (b2 < 0.15 ? 0 : Math.sin(((b2 - 0.15) / 0.85) * Math.PI * 2) * 0.10 * Math.sin(b2 * Math.PI));
     } else {
-      // BEAT 5: Crisp grounded skid-settle ending 0px flush on pierY!
+      // BEAT 5: Crisp grounded skid-settle ending 0px flush on pierY, looking right at the human!
       phase = 'settle';
       const s = clamp((t - 0.90) / 0.10, 0, 1);
       fx = restX;
-      const settleHop = s < 0.50 ? Math.sin((s / 0.50) * Math.PI) * lerp(1.6, 0.8, wf) : 0;
+      const settleHop = s < 0.50 ? Math.sin((s / 0.50) * Math.PI) * lerp(1.5, 0.7, wf) : 0;
       fy = restY - settleHop;
-      mode = isBig ? 'left' : 'right';
+      mode = 'right';
+      flipScaleX = 1;
       angle = 0;
-      if (s >= 0.50 && s < 0.78) {
-        const sp = (s - 0.50) / 0.28;
-        const amt = Math.sin(sp * Math.PI);
-        squashX = 1 + 0.06 * amt;
-        squashY = 1 - 0.05 * amt;
-      }
     }
   } else {
-    // LIVE CAUGHT STATE: FIRMLY GROUNDED ON THE BACK OF THE DOCK with snappy periodic wet flop hops!
+    // LIVE CAUGHT STATE: FIRMLY GROUNDED ON THE BACK OF THE DOCK, LOOKING AT THE HUMAN!
     phase = 'flop';
     const cycle = 1.55;
     const local = ct % cycle;
     let flopHop = 0;
     let flopSlide = 0;
-    mode = isBig ? 'left' : 'right';
+    mode = 'right';
+    flipScaleX = 1;
     angle = 0;
     if (ct > 0.35 && local > 0.82 && local < 1.10) {
       const fp = (local - 0.82) / 0.28;
-      flopHop = Math.sin(fp * Math.PI) * lerp(3.8, 2.0, wf);
-      flopSlide = Math.sin(fp * Math.PI * 2) * lerp(1.0, 0.4, wf);
-      angle = Math.sin(fp * Math.PI * 2) * (isGiant ? 0.06 : 0.12) * Math.sin(fp * Math.PI);
-    } else if (ct > 0.35 && local >= 1.10 && local < 1.22) {
-      const sp = (local - 1.10) / 0.12;
-      const amt = Math.sin(sp * Math.PI);
-      squashX = 1 + 0.09 * amt;
-      squashY = 1 - 0.08 * amt;
+      flopHop = Math.sin(fp * Math.PI) * lerp(3.6, 1.9, wf);
+      flopSlide = Math.sin(fp * Math.PI * 2) * lerp(0.9, 0.4, wf);
+      angle = isBig ? 0 : Math.sin(fp * Math.PI * 2) * 0.10 * Math.sin(fp * Math.PI);
+    } else if (!isBig && ct > 0.35 && local >= 1.10 && local < 1.22) {
+      const amt = Math.sin(((local - 1.10) / 0.12) * Math.PI);
+      squashX = 1 + 0.08 * amt;
+      squashY = 1 - 0.07 * amt;
     }
     fx = clamp(restX + flopSlide, minScreenX <= restSafeBackX ? minScreenX : restX, restSafeBackX);
     fy = restY - flopHop;
