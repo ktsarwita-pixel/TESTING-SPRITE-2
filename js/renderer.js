@@ -1417,7 +1417,11 @@ function drawCrispFishSprite(ctx, img, fishId, mode, frame, flashWhite, cx, cy, 
     const drawW = Math.max(1, Math.round(rotImg.width * sx));
     const drawH = Math.max(1, Math.round(rotImg.height * sy));
     const dx = Math.round(cx - drawW / 2);
-    const dy = Math.round(cy - drawH / 2);
+    let dy = Math.round(cy - drawH / 2);
+    if (clampToPier && dx <= pierEndX + 1) {
+      const maxRotDy = pierY + 2 - drawH;
+      if (dy > maxRotDy) dy = maxRotDy;
+    }
     ctx.imageSmoothingEnabled = false;
     if (drawW === rotImg.width && drawH === rotImg.height) {
       ctx.drawImage(rotImg, dx, dy);

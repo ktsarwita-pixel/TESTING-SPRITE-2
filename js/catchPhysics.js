@@ -21,7 +21,7 @@ function getAnglerSafetyBounds(g, rig) {
   const footCenterX = g.anglerX + 11;
   // Frame-invariant worst-case angler envelope during the overhead duck pass!
   // Using constant bounds prevents instantaneous hatPopY / lean steps from jittering the Bezier parabola!
-  const staticHatTopY = g.pierY - 29.0;
+  const staticHatTopY = g.pierY - 30.0;
   const staticBackSafeX = footCenterX - 9.5;
   const staticFrontSafeX = footCenterX + 9.5;
   const hx = rig ? rig.headX : footCenterX;
@@ -156,13 +156,15 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
   // Starts at launchPitch (matching end of yank!), glides smoothly through 0 at apex,
   // peaks gently nose-down during dive, then levels smoothly toward 0 right before belly-slam!
   const evalLaunchAngle = (p) => {
-    if (p < 0.82) {
-      const a = smootherstep(p / 0.82);
-      return lerp(launchPitch, divePitch, a);
+    // Smooth arc pitch synced with mid-air apex turnaround at p = 0.46 (ZERO angle jump at turnaround OR dock slam!):
+    // p = 0.00..0.46 ('left'): nose climbs smoothly launchPitch -> 0 at exact apex turnaround!
+    // p = 0.46..1.00 ('right'): glides nose-down-right (+diveArc -> 0) facing the human smoothly into the dock!
+    if (p <= 0.46) {
+      return lerp(launchPitch, 0, smootherstep(p / 0.46));
     }
-    // Last 18% smoothly levels out into a heavy belly-flop slam (ZERO sudden snap at t=0.56!)
-    const lv = smootherstep((p - 0.82) / 0.18);
-    return lerp(divePitch, 0, lv);
+    const dp = (p - 0.46) / 0.54;
+    const descTilt = isGiant ? 0.16 : isBig ? 0.20 : 0.24;
+    return Math.sin(dp * Math.PI) * descTilt;
   };
 
   const evalLaunchState = (p) => {
@@ -227,24 +229,37 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
       const cur = evalLaunchState(p);
       fx = cur.x;
       fy = cur.y;
-      mode = 'left';
       angle = cur.angle;
       squashX = cur.sx;
       squashY = cur.sy;
 
-      // 2 crisp subtle motion afterimages (soft opacity so big fish never look cluttered!)
+      // Smooth mid-air apex turnaround right over the angler's head (p = 0.30..0.62, crossing at p = 0.46!)
+      // Fish turns cleanly in mid-air to keep looking at the human — ZERO instant flip on the dock!
+      const evalModeTurn = (pp) => {
+        if (pp < 0.30) return { m: 'left', fxScale: 1 };
+        if (pp > 0.62) return { m: 'right', fxScale: 1 };
+        const tw = smootherstep((pp - 0.30) / 0.32);
+        const c = Math.cos(tw * Math.PI); // +1 -> 0 -> -1
+        return { m: c >= 0 ? 'left' : 'right', fxScale: Math.max(isGiant ? 0.42 : 0.34, Math.abs(c)) };
+      };
+      const turnNow = evalModeTurn(p);
+      mode = turnNow.m;
+      flipScaleX = turnNow.fxScale;
+
+      // 2 crisp subtle motion afterimages matching exact mid-air orientation & smooth angle!
       for (let gi = 1; gi <= 2; gi++) {
         const gp = p - gi * 0.042;
         if (gp > 0.02) {
           const gPt = evalLaunchState(gp);
+          const gTurn = evalModeTurn(gp);
           ghosts.push({
             x: gPt.x,
             y: gPt.y,
-            mode: 'left',
+            mode: gTurn.m,
             angle: gPt.angle,
-            sx: gPt.sx,
+            sx: gPt.sx * gTurn.fxScale,
             sy: gPt.sy,
-            alpha: (isGiant ? 0.22 : 0.30) - gi * 0.08,
+            alpha: (isGiant ? 0.20 : 0.28) - gi * 0.08,
           });
         }
       }
@@ -294,8 +309,9 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
         fx = lerp(slamX, midX, smootherstep(airP));
         const bounceH1 = lerp(10.0, 5.5, wf);
         fy = restY - Math.sin(airP * Math.PI) * bounceH1;
-        // Pure 1:1 native crisp pixels on big fish (angle = 0 -> ZERO RotSprite boundary flicker on dock!)
-        angle = isBig ? 0 : Math.sin(airP * Math.PI * 2) * 0.18 * Math.sin(airP * Math.PI);
+        // Silky weighty RotSprite rocking bounce (gentle +/-9° for giant, +/-12° for big, +/-16° for small!)
+        const bRock = isGiant ? 0.14 : isBig ? 0.19 : 0.24;
+        angle = -Math.sin(airP * Math.PI) * bRock * Math.cos(airP * Math.PI * 0.85);
       }
     } else if (t < 0.90) {
       // BEAT 4: Dampened secondary bounce sliding cleanly onto restX, looking at the human!
@@ -307,7 +323,8 @@ export function computeBackDockLanding(g, rig, overrideT = null) {
       fy = restY - Math.sin(b2 * Math.PI) * bounceH2;
       mode = 'right';
       flipScaleX = 1;
-      angle = isBig ? 0 : (b2 < 0.15 ? 0 : Math.sin(((b2 - 0.15) / 0.85) * Math.PI * 2) * 0.10 * Math.sin(b2 * Math.PI));
+      const b2Rock = isGiant ? 0.07 : isBig ? 0.10 : 0.14;
+      angle = b2 < 0.12 ? 0 : -Math.sin(((b2 - 0.12) / 0.88) * Math.PI) * b2Rock;
     } else {
       // BEAT 5: Crisp grounded skid-settle ending 0px flush on pierY, looking right at the human!
       phase = 'settle';

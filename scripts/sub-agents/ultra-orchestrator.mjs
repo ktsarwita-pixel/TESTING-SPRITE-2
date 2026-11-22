@@ -235,17 +235,25 @@ const ULTRA_AGENTS = [
     run: async () => {
       const issues = [];
       for (const id of ALL_IDS) {
+        const resDesc = rasterizeFrame(id, 0.50);
         const resSlam = rasterizeFrame(id, 0.58);
+        const resBounce = rasterizeFrame(id, 0.64);
         const resRest = rasterizeFrame(id, 1.0);
+        if (resDesc.land.mode !== 'right') {
+          issues.push(`${id}: did not turn mid-air before dock slam (mode at t=0.50 is '${resDesc.land.mode}')`);
+        }
         if (resSlam.land.mode !== 'right' || resRest.land.mode !== 'right') {
-          issues.push(`${id}: not looking at the human (mode=${resRest.land.mode}, expected 'right')`);
+          issues.push(`${id}: not looking at the human on dock (mode=${resRest.land.mode})`);
         }
         if ((resSlam.land.flipScaleX ?? 1) < 0.99 || (resRest.land.flipScaleX ?? 1) < 0.99) {
-          issues.push(`${id}: horizontal accordion squish detected (flipScaleX=${resSlam.land.flipScaleX})`);
+          issues.push(`${id}: horizontal squish on dock (flipScaleX=${resSlam.land.flipScaleX})`);
+        }
+        if (Math.abs(resBounce.land.angle || 0) < 0.04) {
+          issues.push(`${id}: stiff un-rotated bounce at t=0.64 (angle=${resBounce.land.angle})`);
         }
       }
       const score = clampScore(100 - issues.length * 15);
-      return { score, summary: `All 26/26 species look RIGHT at the human on dock with 0 accordion distortion`, issues };
+      return { score, summary: `All 26/26 species turn smoothly mid-air, bounce with weighty rotation & look at human (0 dock flip)`, issues };
     },
   },
   {
