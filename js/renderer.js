@@ -49,9 +49,16 @@ export function drawPixelQuad(ctx, x0, y0, cx, cy, x1, y1, color, steps = 16) {
   }
 }
 
+const _skyPalCache = new Map();
 export function sampleSkyPalette(timeOfDay, map) {
-  const keys = (map && map.skyKeys) || getMapById('harbor').skyKeys;
+  const mapId = (map && map.id) || 'harbor';
   const t = ((timeOfDay % 1) + 1) % 1;
+  const bucket = Math.round(t * 600);
+  const cacheKey = `${mapId}:${bucket}`;
+  const cached = _skyPalCache.get(cacheKey);
+  if (cached) return cached;
+
+  const keys = (map && map.skyKeys) || getMapById('harbor').skyKeys;
   let a = keys[0], b = keys[1];
   for (let i = 0; i < keys.length - 1; i++) {
     if (t >= keys[i].t && t <= keys[i + 1].t) {
@@ -62,11 +69,14 @@ export function sampleSkyPalette(timeOfDay, map) {
   }
   const span = Math.max(0.0001, b.t - a.t);
   const f = (t - a.t) / span;
-  return {
+  const res = {
     sky: a.sky.map((c, i) => lerpColor(c, b.sky[i], f)),
     water: a.water.map((c, i) => lerpColor(c, b.water[i], f)),
     night: lerp(a.night, b.night, f),
   };
+  if (_skyPalCache.size > 160) _skyPalCache.clear();
+  _skyPalCache.set(cacheKey, res);
+  return res;
 }
 
 function getCelestialState(g) {
@@ -86,14 +96,25 @@ function getCelestialState(g) {
   return { sunX, sunY, sunVisible, moonX, moonY, moonVisible };
 }
 
-// Crisp circular pixel-art halo (zero blocky rectangular glow boxes!)
+// Crisp circular pixel-art halo with pre-baked integer scanline spans (zero per-frame Math.sqrt!)
+const _haloSpanCache = new Map();
 function drawPixelHalo(ctx, cx, cy, r, color, alpha) {
   if (alpha <= 0.005 || r <= 0) return;
+  const ri = Math.round(r);
+  if (ri <= 0) return;
+  let spans = _haloSpanCache.get(ri);
+  if (!spans) {
+    spans = new Int16Array(ri * 2 + 1);
+    const rr = ri * ri;
+    for (let dy = -ri; dy <= ri; dy++) {
+      spans[dy + ri] = Math.floor(Math.sqrt(Math.max(0, rr - dy * dy)));
+    }
+    _haloSpanCache.set(ri, spans);
+  }
   ctx.fillStyle = color;
   ctx.globalAlpha = alpha;
-  const rr = r * r;
-  for (let dy = -r; dy <= r; dy++) {
-    const span = Math.floor(Math.sqrt(Math.max(0, rr - dy * dy)));
+  for (let dy = -ri; dy <= ri; dy++) {
+    const span = spans[dy + ri];
     if (span >= 0) ctx.fillRect(cx - span, cy + dy, span * 2 + 1, 1);
   }
 }
@@ -1053,16 +1074,16 @@ function renderPierFront(g, ctx, map, pal) {
     }
   }
 
-  // Wooden bait bucket grounded cleanly on pierY (pops into the air on dock slam shockwave!)
+  // Wooden bait bucket tucked near left bollard — clear of big-fish slam zone, jumps on heavy slams!
   const bucket = g.sprites.props.bucket;
-  const bucketX = (map.id === 'harbor' || map.id === 'fjord') && g.pierEndX >= 68 ? Math.max(18, g.pierEndX - 55) : 3;
+  const bucketX = (map.id === 'harbor' && g.pierEndX >= 68) ? 12 : 3;
   ctx.fillStyle = '#1f140d';
   ctx.fillRect(bucketX + 1, g.pierY, bucket.width - 2, 1);
   ctx.drawImage(bucket, bucketX, g.pierY - bucket.height + 1 + propJump);
 
-  // Red tackle box grounded cleanly on pierY (pops into the air on dock slam shockwave!)
+  // Red tackle box tucked beside pier tip — clear of big-fish slam zone, jumps on heavy slams!
   const box = g.sprites.props.tacklebox;
-  const boxX = Math.max(15, g.pierEndX - 34);
+  const boxX = Math.max(18, g.pierEndX - 10);
   ctx.fillStyle = '#1f140d';
   ctx.fillRect(boxX + 1, g.pierY, box.width - 2, 1);
   ctx.drawImage(box, boxX, g.pierY - box.height + 1 + Math.round(propJump * 0.85));
@@ -1594,55 +1615,104 @@ function renderLandingFishForeground(g, ctx) {
     true
   );
 
-  // 7b. FOREGROUND PUNCHY DOCK SLAM BURST (medium/big/giant fish ONLY — small fish cannot make a big dock shockwave!)
+  // 7b. CINEMATIC MULTI-STAGE BIG-FISH DOCK SHOCKWAVE & LANDING FX (medium/big/giant fish ONLY — zero pixel clutter!)
   if (land.impactFlash && land.impactFlash.shockwave !== false && (land.impactFlash.wf ?? (g.landingWeightFactor || 0.35)) >= 0.36) {
     const imp = land.impactFlash;
     const p = clamp(imp.progress, 0, 1);
     const ix = Math.round(imp.x);
     const iy = Math.round(imp.y);
     const wf = imp.wf ?? (g.landingWeightFactor || 0.35);
+    const isHeavy = wf >= 0.65;
     const hw = Math.max(6, Math.round(imp.halfW || 9));
-    const maxR = hw + (imp.big ? (11 + wf * 7) : (7 + wf * 4));
+    const maxR = hw + (imp.big ? (12 + wf * 9) : (7 + wf * 4));
     ctx.save();
-    // Bright plank impact flash bar under the belly
-    if (p < 0.40) {
-      const fp = p / 0.40;
-      const flashW = Math.round(lerp(hw * 1.4, maxR * 1.5, fp));
-      ctx.globalAlpha = (1 - fp) * 0.95;
-      ctx.fillStyle = fp < 0.35 ? '#ffffff' : '#fde047';
-      ctx.fillRect(Math.max(1, ix - Math.floor(flashW / 2)), iy, flashW, 1);
+
+    // Stage 1: Localized 1px plank-flex shadow + bright contact shockbar directly on pierY
+    if (p < 0.36) {
+      const fp = p / 0.36;
+      const flexW = Math.round(hw * 1.65);
+      const flexL = Math.max(1, ix - Math.floor(flexW / 2));
+      ctx.globalAlpha = (1 - fp) * 0.65;
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(flexL, iy + 1, Math.min(flexW, g.pierEndX - flexL + 1), 1);
+
+      const flashW = Math.round(lerp(hw * 1.45, maxR * 1.55, fp));
+      const flashL = Math.max(1, ix - Math.floor(flashW / 2));
+      ctx.globalAlpha = (1 - fp) * 0.96;
+      ctx.fillStyle = fp < 0.30 ? '#ffffff' : fp < 0.68 ? '#fde047' : '#7dd3fc';
+      ctx.fillRect(flashL, iy, Math.min(flashW, g.pierEndX - flashL + 2), 1);
     }
-    // Crisp expanding semi-elliptical shockwave dome hugging the wooden planks!
-    if (p < 0.75) {
-      const dp = p / 0.75;
-      const rx = lerp(hw * 1.04, maxR + 3, Math.pow(dp, 0.58));
-      const ry = lerp(Math.max(5, sprSet.h * 0.45), Math.max(9, sprSet.h * 0.65) + wf * 5, Math.pow(dp, 0.62));
+
+    // Stage 2: Traveling horizontal plank shockwave crests racing outward left & right along the dock!
+    if (imp.big && p < 0.72) {
+      const tp = p / 0.72;
+      const waveDist = lerp(hw * 0.92, maxR + (isHeavy ? 18 : 8), Math.pow(tp, 0.55));
+      const waveAlpha = (1 - tp) * (isHeavy ? 0.94 : 0.76);
+      const crestCol = tp < 0.32 ? '#ffffff' : tp < 0.62 ? '#fde047' : '#7dd3fc';
+      for (const side of [-1, 1]) {
+        const wx = Math.round(ix + side * waveDist);
+        if (wx >= 1 && wx <= g.pierEndX + 1) {
+          ctx.globalAlpha = waveAlpha;
+          ctx.fillStyle = crestCol;
+          ctx.fillRect(wx, iy, 2, 1);
+          ctx.fillRect(wx - side, iy - 1, 1, 1);
+          if (isHeavy && tp < 0.55) {
+            ctx.globalAlpha = waveAlpha * 0.72;
+            ctx.fillStyle = '#fb923c';
+            ctx.fillRect(wx - side * 2, iy, 2, 1);
+          }
+        }
+      }
+    }
+
+    // Stage 3: Dual concentric shockwave dome strictly OUTSIDE the fish silhouette!
+    if (p < 0.78) {
+      const dp = p / 0.78;
+      const rx = lerp(hw * 1.04, maxR + (isHeavy ? 6 : 3), Math.pow(dp, 0.56));
+      const ry = lerp(Math.max(5, sprSet.h * 0.48), Math.max(10, sprSet.h * 0.70) + wf * 6, Math.pow(dp, 0.60));
       const domeFade = (1 - dp) * (imp.big ? 0.92 : 0.68);
-      const steps = 18;
+      const steps = isHeavy ? 22 : 18;
       for (let i = 0; i <= steps; i++) {
         const a = Math.PI + (i / steps) * Math.PI;
         const px = Math.round(ix + Math.cos(a) * rx);
         const py = Math.round(iy + Math.sin(a) * ry);
-        if (py > iy) continue;
-        ctx.globalAlpha = domeFade * (i % 2 === 0 ? 1 : 0.75);
-        ctx.fillStyle = dp < 0.28 ? '#ffffff' : dp < 0.58 ? '#fde047' : '#7dd3fc';
+        if (py > iy || px < 0 || px > g.pierEndX + 18) continue;
+        ctx.globalAlpha = domeFade * (i % 2 === 0 ? 1 : 0.72);
+        ctx.fillStyle = dp < 0.26 ? '#ffffff' : dp < 0.56 ? '#fde047' : '#7dd3fc';
         ctx.fillRect(px, py, 1, 1);
       }
+      // Secondary inner amber-gold kinetic arc for big/giant species (wf >= 0.65)
+      if (imp.big && isHeavy && p < 0.56) {
+        const ip2 = p / 0.56;
+        const irx = lerp(hw * 1.02, maxR * 0.88 + 3, Math.pow(ip2, 0.62));
+        const iry = lerp(Math.max(4, sprSet.h * 0.36), Math.max(8, sprSet.h * 0.54) + wf * 4, Math.pow(ip2, 0.64));
+        const innerFade = (1 - ip2) * 0.84;
+        for (let i = 1; i < 16; i += 2) {
+          const a = Math.PI + (i / 16) * Math.PI;
+          const px = Math.round(ix + Math.cos(a) * irx);
+          const py = Math.round(iy + Math.sin(a) * iry);
+          if (py > iy || px < 0 || px > g.pierEndX + 16) continue;
+          ctx.globalAlpha = innerFade;
+          ctx.fillStyle = ip2 < 0.35 ? '#fef08a' : '#fb923c';
+          ctx.fillRect(px, py, 1, 1);
+        }
+      }
     }
-    // 6 bold brief arcade impact spark wedges radiating OUTSIDE the squashed fish (frames 1-5, p < 0.38!)
-    if (imp.big && p < 0.38) {
-      const wp = p / 0.38;
-      const innerR = hw * 1.02 + wp * 3;
-      const outerR = innerR + lerp(5, 10 + wf * 3, Math.pow(wp, 0.6));
-      const dirs = [[-1.0, -0.18], [-0.88, -0.52], [0.88, -0.52], [1.0, -0.18]];
-      ctx.globalAlpha = clamp(1 - wp * 0.82, 0.15, 1);
+
+    // Stage 4: Sharp flanking directional kinetic spark wedges strictly OUTSIDE the fish (zero fish overlap!)
+    if (imp.big && p < 0.42) {
+      const wp = p / 0.42;
+      const innerR = hw * 1.04 + wp * 3.5;
+      const outerR = innerR + lerp(5, 11 + wf * 4, Math.pow(wp, 0.58));
+      const dirs = [[-1.0, -0.16], [-0.86, -0.54], [0.86, -0.54], [1.0, -0.16]];
+      ctx.globalAlpha = clamp(1 - wp * 0.80, 0.16, 1);
       for (const [dx2, dy2] of dirs) {
         const x1 = ix + Math.round(dx2 * innerR);
-        const y1 = iy - 2 + Math.round(dy2 * (innerR * 0.62));
+        const y1 = iy - 2 + Math.round(dy2 * (innerR * 0.60));
         const x2 = ix + Math.round(dx2 * outerR);
         const y2 = iy - 2 + Math.round(dy2 * (outerR * 0.78));
-        drawPixelLine(ctx, x1, y1, x2, y2, wp < 0.35 ? '#ffffff' : '#fde047');
-        if (wp < 0.55) drawPixelLine(ctx, x1, y1 - 1, x2, y2, '#fb923c');
+        drawPixelLine(ctx, x1, y1, x2, y2, wp < 0.32 ? '#ffffff' : '#fde047');
+        if (wp < 0.58) drawPixelLine(ctx, x1, y1 - 1, x2, y2, isHeavy ? '#fb923c' : '#bae6fd');
       }
     }
     ctx.restore();

@@ -215,7 +215,13 @@ class PierlineGame {
   }
 
   getMapSpecies(mapId = this.save.currentMap) {
-    return FISH_SPECIES.filter((sp) => !sp.maps || sp.maps.includes(mapId));
+    if (!this._mapSpeciesCache) this._mapSpeciesCache = new Map();
+    let list = this._mapSpeciesCache.get(mapId);
+    if (!list) {
+      list = FISH_SPECIES.filter((sp) => !sp.maps || sp.maps.includes(mapId));
+      this._mapSpeciesCache.set(mapId, list);
+    }
+    return list;
   }
 
   initDOM() {
@@ -1791,17 +1797,23 @@ class PierlineGame {
   }
 
   updateHUD() {
+    const t = this.timeOfDay;
+    const label = t < 0.14 || t >= 0.86 ? 'NIGHT' : t < 0.25 ? 'DAWN' : t < 0.68 ? 'DAY' : 'SUNSET';
+    const key = `${this.save.coins}|${this.save.totalCaught}|${this.save.sound ? 1 : 0}|${label}`;
+    if (this._lastHudKey === key) return;
+    this._lastHudKey = key;
     this.el.coins.textContent = this.save.coins;
     this.el.caught.textContent = this.save.totalCaught;
     this.el.btnSound.textContent = this.save.sound ? 'SFX' : 'MUTE';
     this.el.btnSound.classList.toggle('muted', !this.save.sound);
-
-    const t = this.timeOfDay;
-    const label = t < 0.14 || t >= 0.86 ? 'NIGHT' : t < 0.25 ? 'DAWN' : t < 0.68 ? 'DAY' : 'SUNSET';
     this.el.time.textContent = label;
   }
 
   updateControlsUI() {
+    const swTxt = this.swallowBannerTimer > 0 && this.swallowBannerText ? this.swallowBannerText : '';
+    const ctrlKey = `${this.state}|${this.retrieving ? 1 : 0}|${this.fishFightState}|${this.inSweetSpot ? 1 : 0}|${this.save.upgrades?.reel || 0}|${swTxt}`;
+    if (this._lastCtrlKey === ctrlKey) return;
+    this._lastCtrlKey = ctrlKey;
     const btn = this.el.actionBtn;
     const hint = this.el.hint;
     btn.classList.remove('is-bite', 'is-reel', 'is-sweet', 'is-brace', 'is-warn');
@@ -2087,13 +2099,21 @@ class PierlineGame {
         hot: isHot,
       });
     }
+    const swapPop = (arr, idx) => {
+      const last = arr.length - 1;
+      if (idx !== last) arr[idx] = arr[last];
+      arr.pop();
+    };
+    if (this.particles.length > 180) this.particles.length = 180;
+    if (this.ripples.length > 24) this.ripples.length = 24;
+
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
       const b = this.bubbles[i];
       b.y -= b.vy * dt;
       b.x += Math.sin(this.time * 4 + b.wobble) * 5 * dt;
       if (b.y <= this.waterY + 2) {
         if (Math.random() < 0.25 && !this.activeModal) sound.playWaterBubble(this.panAtX(b.x));
-        this.bubbles.splice(i, 1);
+        swapPop(this.bubbles, i);
       }
     }
 
@@ -2101,7 +2121,7 @@ class PierlineGame {
       const r = this.ripples[i];
       r.r += 16 * dt;
       r.alpha = 1 - r.r / r.maxR;
-      if (r.r >= r.maxR) this.ripples.splice(i, 1);
+      if (r.r >= r.maxR) swapPop(this.ripples, i);
     }
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
@@ -2110,14 +2130,14 @@ class PierlineGame {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.life -= dt;
-      if (p.life <= 0) this.particles.splice(i, 1);
+      if (p.life <= 0) swapPop(this.particles, i);
     }
 
     for (let i = this.floats.length - 1; i >= 0; i--) {
       const f = this.floats[i];
       f.y += f.vy * dt;
       f.life -= dt;
-      if (f.life <= 0) this.floats.splice(i, 1);
+      if (f.life <= 0) swapPop(this.floats, i);
     }
 
     // Animated nocturnal shooting stars / astral meteors
@@ -2146,7 +2166,7 @@ class PierlineGame {
       st.y += st.vy * dt;
       st.life -= dt;
       if (st.life <= 0 || st.y >= this.waterY - 4 || st.x < -16) {
-        this.shootingStars.splice(i, 1);
+        swapPop(this.shootingStars, i);
       }
     }
 
@@ -2314,22 +2334,31 @@ class PierlineGame {
         // Water droplets (plus wood splinters & spark spray ONLY for medium/big/giant fish!)
         const map = this.getCurrentMap();
         const splinterCol = map.dockStyle === 'marble' ? '#e2e8f0' : map.dockStyle === 'basalt' ? '#fb923c' : map.dockStyle === 'frost' ? '#bae6fd' : '#c98c50';
-        const burstN = isSmallFish ? 6 : Math.round(16 + wf * 20);
+        const burstN = isSmallFish ? 6 : Math.round(18 + wf * 22);
         for (let i = 0; i < burstN; i++) {
-          const ang = -Math.PI * rand(0.08, 0.92);
-          const spd = isSmallFish ? rand(10, 26) : rand(18, 56 + wf * 28);
+          // Flanking low-to-mid arc trajectories so particles burst cleanly OUTWARD beside big fish!
+          const side = (i % 2 === 0) ? -1 : 1;
+          const elev = isSmallFish ? rand(0.22, 0.85) : rand(0.12, 0.72);
+          const ang = side < 0 ? Math.PI - elev * 1.15 : elev * 1.15;
+          const spd = isSmallFish ? rand(10, 24) : rand(24, 62 + wf * 34);
+          const spawnOff = isSmallFish ? rand(-land.w * 0.25, land.w * 0.25) : side * rand(land.w * 0.28, land.w * 0.52);
           this.particles.push({
-            x: land.slamX + rand(-land.w * 0.32, land.w * 0.32),
+            x: clamp(land.slamX + spawnOff, 2, this.pierEndX + 4),
             y: this.pierY - 1,
             vx: Math.cos(ang) * spd,
-            vy: Math.sin(ang) * spd - (isSmallFish ? rand(2, 7) : rand(4, 16)),
-            g: 138,
-            life: isSmallFish ? rand(0.18, 0.34) : rand(0.26, 0.58),
-            size: isSmallFish ? 1 : (i % 4 === 0 ? 2 : 1),
+            vy: -Math.abs(Math.sin(ang) * spd) - (isSmallFish ? rand(2, 6) : rand(5, 16 + wf * 8)),
+            g: isSmallFish ? 132 : 148,
+            life: isSmallFish ? rand(0.18, 0.32) : rand(0.28, 0.62),
+            size: isSmallFish ? 1 : (i % 5 === 0 ? 2 : 1),
             color: isSmallFish
               ? (i % 2 === 0 ? '#e0f2fe' : '#bae6fd')
-              : (i % 3 === 0 ? splinterCol : i % 3 === 1 ? '#e0f2fe' : '#fde047'),
+              : (i % 4 === 0 ? splinterCol : i % 4 === 1 ? '#ffffff' : i % 4 === 2 ? '#e0f2fe' : '#fde047'),
           });
+        }
+        // Water-edge splash ripples off the pier tip when a heavy/giant fish shakes the dock!
+        if (!isSmallFish && wf >= 0.55) {
+          this.spawnRipple(this.pierEndX + 5, this.waterY);
+          this.spawnRipple(this.pierEndX + 12, this.waterY);
         }
       }
 

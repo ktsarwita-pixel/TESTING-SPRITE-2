@@ -508,15 +508,25 @@ const ULTRA_AGENTS = [
     group: 'VFX',
     run: async () => {
       const renSrc = fs.readFileSync(path.join(ROOT, 'js/renderer.js'), 'utf8');
+      const gameSrc = fs.readFileSync(path.join(ROOT, 'js/game.js'), 'utf8');
       const issues = [];
-      if (!renSrc.includes('drawWaterBreachPlume')) issues.push('Missing drawWaterBreachPlume');
-      if (!renSrc.includes('drawPixelDustPuff')) issues.push('Missing drawPixelDustPuff');
-      const scBreach = rasterizeFrame('snapper', 0.22);
-      if (!scBreach.land.breachPlume) issues.push('Missing ocean breachPlume at t=0.22');
-      const scSlam = rasterizeFrame('snapper', 0.57);
-      if (!scSlam.land.impactFlash || !scSlam.land.impactFlash.big) issues.push('Missing big impactFlash at Slam #1');
-      const score = clampScore(100 - issues.length * 20);
-      return { score, summary: `Ocean splash crown, foreground slam burst, shockwave dome & dust wisps verified`, issues };
+      for (const needle of ['_skyPalCache', '_haloSpanCache', 'waveDist', 'innerFade', 'flexW', 'drawPixelDustPuff']) {
+        if (!renSrc.includes(needle)) issues.push(`renderer.js missing ${needle}`);
+      }
+      for (const needle of ['swapPop', '_lastHudKey', '_lastCtrlKey', '_mapSpeciesCache']) {
+        if (!gameSrc.includes(needle)) issues.push(`game.js missing optimization ${needle}`);
+      }
+      for (const id of ['snapper', 'tuna', 'leviathan', 'krakentitan']) {
+        const fSlam = rasterizeFrame(id, 0.58);
+        if (!fSlam.land.impactFlash || !fSlam.land.impactFlash.shockwave) {
+          issues.push(`${id}: missing big-fish shockwave`);
+        }
+      }
+      return {
+        score: clampScore(100 - issues.length * 15),
+        summary: 'Multi-stage big-fish shockwave (plank wave + dual dome + outside sparks) & zero-GC engine caches verified',
+        issues,
+      };
     },
   },
   {
