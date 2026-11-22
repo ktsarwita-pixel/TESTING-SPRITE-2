@@ -1248,9 +1248,9 @@ class PierlineGame {
     predator.vy = 0;
     this.activeFish = predator;
     this.mouthDirSmooth = predator.dir;
-    const fSprR = this.sprites.fish[fish.species.id];
-    const fishHalfWR = fSprR ? fSprR.w * 0.5 : 8;
-    const landX = this.pierEndX + Math.max(10, fishHalfWR + 3);
+    const predSpr = this.sprites.fish[predator.species.id];
+    const predHalfW = predSpr ? predSpr.w * 0.5 : 8;
+    const landX = this.pierEndX + Math.max(10, predHalfW + 3);
     const landY = this.waterY + 6;
     const newDist = Math.hypot(predator.x - landX, predator.y - landY);
     this.reelTotalDist = Math.max(28, newDist * 1.15);
@@ -2396,7 +2396,9 @@ class PierlineGame {
       this.updateControlsUI();
     }
 
-    const landX = this.pierEndX + 10;
+    const fSprR = this.sprites.fish[fish.species.id];
+    const fishHalfWR = fSprR ? fSprR.w * 0.5 : 8;
+    const landX = this.pierEndX + Math.max(10, fishHalfWR + 3);
     const landY = this.waterY + 6;
     const toX = landX - fish.x;
     const toY = landY - fish.y;

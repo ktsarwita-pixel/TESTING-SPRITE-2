@@ -33,6 +33,8 @@ const ALL_WORKERS = [
   'noclip-pier-qa',
   'screenshotter-action',
   'screenshotter-noclip',
+  'gameplay-e2e-qa',
+  'state-machine-qa',
 ];
 
 async function runSpriteInspector() {
@@ -657,6 +659,17 @@ async function runScreenshotterNoclip() {
   };
 }
 
+
+async function runGameplayE2EWorker() {
+  const { runGameplayE2E } = await import(path.join(__dirname, 'gameplayAgent.mjs'));
+  return runGameplayE2E();
+}
+
+async function runStateMachineWorker() {
+  const { runStateMachineQA } = await import(path.join(__dirname, 'gameplayAgent.mjs'));
+  return runStateMachineQA();
+}
+
 const WORKER_MAP = {
   'sprite-inspector': runSpriteInspector,
   'audio-qa': runAudioQA,
@@ -670,6 +683,8 @@ const WORKER_MAP = {
   'noclip-pier-qa': runNoclipPierQA,
   'screenshotter-action': runScreenshotterAction,
   'screenshotter-noclip': runScreenshotterNoclip,
+  'gameplay-e2e-qa': runGameplayE2EWorker,
+  'state-machine-qa': runStateMachineWorker,
 };
 
 const args = process.argv.slice(2);
